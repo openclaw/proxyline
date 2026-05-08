@@ -14,6 +14,7 @@
     "noUncheckedIndexedAccess": true,
     "outDir": "dist",
     "rootDir": ".",
+    "skipLibCheck": true,
     "strict": true,
     "target": "ES2022"
   },

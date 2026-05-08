@@ -24,17 +24,21 @@ test("managed mode explains proxied decisions without leaking credentials", () =
     onEvent: (event) => events.push(event),
   });
 
-  const decision = proxy.explain("https://api.example.com/v1", { surface: "undici" });
+  try {
+    const decision = proxy.explain("https://api.example.com/v1", { surface: "undici" });
 
-  assert.equal(decision.kind, "proxied");
-  assert.equal(decision.reason, "managed-proxy-active");
-  assert.equal(decision.proxyUrl, "https://proxy.example:8443/");
-  assert.deepEqual(events[0], {
-    type: "runtime.installed",
-    mode: "managed",
-    active: true,
-    proxyUrl: "https://proxy.example:8443/",
-  });
+    assert.equal(decision.kind, "proxied");
+    assert.equal(decision.reason, "managed-proxy-active");
+    assert.equal(decision.proxyUrl, "https://proxy.example:8443/");
+    assert.deepEqual(events[0], {
+      type: "runtime.installed",
+      mode: "managed",
+      active: true,
+      proxyUrl: "https://proxy.example:8443/",
+    });
+  } finally {
+    proxy.stop();
+  }
 });
 
 test("ambient mode can be inactive and explain direct routing", () => {

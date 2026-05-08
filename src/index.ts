@@ -1,3 +1,28 @@
+import http from "node:http";
+import https from "node:https";
+import { ProxyAgent as NodeProxyAgent } from "proxy-agent";
+import {
+  Agent as UndiciAgent,
+  type Dispatcher,
+  getGlobalDispatcher,
+  ProxyAgent as UndiciProxyAgent,
+  setGlobalDispatcher,
+} from "undici";
+import {
+  ProxylineError,
+  redactProxyUrl,
+  resolveProxyTlsCa,
+  type ProxylineTlsOptions,
+} from "./shared.js";
+
+export {
+  ProxylineError,
+  redactProxyUrl,
+  resolveProxyTlsCa,
+  type ProxylineTlsOptions,
+} from "./shared.js";
+export { openProxyConnectTunnel, type OpenProxyConnectTunnelOptions } from "./connect.js";
+
 export type ProxylineMode = "managed" | "ambient";
 
 export type ProxylineSurface =
@@ -7,11 +32,6 @@ export type ProxylineSurface =
   | "websocket"
   | "connect"
   | "unknown";
-
-export type ProxylineTlsOptions = Readonly<{
-  ca?: string;
-  caFile?: string;
-}>;
 
 export type ProxylineOptions = Readonly<{
   mode: ProxylineMode;
@@ -57,19 +77,12 @@ export type ProxylineHandle = Readonly<{
   mode: ProxylineMode;
   active: boolean;
   proxyUrl?: string;
+  createNodeAgent: () => http.Agent;
+  createUndiciDispatcher: () => Dispatcher;
+  createWebSocketAgent: () => http.Agent;
   explain: (url: string | URL, options?: ExplainOptions) => ProxylineDecision;
   stop: () => void;
 }>;
-
-export class ProxylineError extends Error {
-  public readonly code: string;
-
-  public constructor(code: string, message: string) {
-    super(message);
-    this.name = "ProxylineError";
-    this.code = code;
-  }
-}
 
 function normalizeProxyUrl(value: string | URL | undefined): URL | undefined {
   if (value === undefined) {
@@ -85,21 +98,151 @@ function normalizeProxyUrl(value: string | URL | undefined): URL | undefined {
   return url;
 }
 
-export function redactProxyUrl(value: string | URL): string {
-  const url = value instanceof URL ? new URL(value.href) : new URL(value);
-  url.username = "";
-  url.password = "";
-  url.search = "";
-  url.hash = "";
-  return url.href;
-}
-
 function emit(onEvent: ProxylineOptions["onEvent"], event: ProxylineEvent): void {
   onEvent?.(event);
 }
 
 function formatUrl(value: string | URL): string {
   return value instanceof URL ? value.href : new URL(value).href;
+}
+
+type NodeHttpRequestOptions = http.RequestOptions & {
+  agent?: http.Agent | false;
+};
+
+type NodeHttpMethod = typeof http.request;
+
+type NodeHttpStackSnapshot = {
+  httpRequest: typeof http.request;
+  httpGet: typeof http.get;
+  httpGlobalAgent: typeof http.globalAgent;
+  httpsRequest: typeof https.request;
+  httpsGet: typeof https.get;
+  httpsGlobalAgent: typeof https.globalAgent;
+};
+
+type RuntimeInstall = {
+  nodeAgent: NodeProxyAgent;
+  originalDispatcher: Dispatcher;
+  snapshot: NodeHttpStackSnapshot;
+};
+
+let activeRuntime: RuntimeInstall | undefined;
+
+function copyNodeHttpOptions(value: unknown): NodeHttpRequestOptions {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return {};
+  }
+  return { ...(value as NodeHttpRequestOptions) };
+}
+
+function bindNodeHttpMethod<TMethod extends NodeHttpMethod>(
+  originalMethod: TMethod,
+  agent: http.Agent,
+): TMethod {
+  return ((...args: unknown[]) => {
+    let url: string | URL | undefined;
+    let options: NodeHttpRequestOptions;
+    let callback: unknown;
+    const firstArg = args[0];
+    if (typeof firstArg === "string" || firstArg instanceof URL) {
+      url = firstArg;
+      if (typeof args[1] === "function") {
+        options = {};
+        callback = args[1];
+      } else {
+        options = copyNodeHttpOptions(args[1]);
+        callback = args[2];
+      }
+    } else {
+      options = copyNodeHttpOptions(firstArg);
+      callback = args[1];
+    }
+
+    options.agent = agent;
+    if (url !== undefined) {
+      return originalMethod(url, options, callback as (res: http.IncomingMessage) => void);
+    }
+    return originalMethod(options, callback as (res: http.IncomingMessage) => void);
+  }) as TMethod;
+}
+
+function createNodeProxyAgent(proxyUrl: string, proxyCa: string | undefined): NodeProxyAgent {
+  return new NodeProxyAgent({
+    ...(proxyCa !== undefined ? { ca: proxyCa } : {}),
+    getProxyForUrl: (url: string) => {
+      const protocol = new URL(url).protocol;
+      return protocol === "http:" || protocol === "https:" || protocol === "ws:" || protocol === "wss:"
+        ? proxyUrl
+        : "";
+    },
+    httpAgent: new http.Agent(),
+    httpsAgent: new https.Agent(),
+  });
+}
+
+function createUndiciProxyDispatcher(
+  proxyUrl: string | undefined,
+  proxyCa: string | undefined,
+): Dispatcher {
+  if (proxyUrl === undefined) {
+    return new UndiciAgent();
+  }
+  return new UndiciProxyAgent({
+    uri: proxyUrl,
+    ...(proxyCa !== undefined ? { proxyTls: { ca: proxyCa } } : {}),
+  });
+}
+
+function installRuntime(proxyUrl: string, proxyCa: string | undefined): RuntimeInstall {
+  if (activeRuntime !== undefined) {
+    throw new ProxylineError("RUNTIME_ALREADY_ACTIVE", "Proxyline already has an active runtime.");
+  }
+  const snapshot: NodeHttpStackSnapshot = {
+    httpRequest: http.request,
+    httpGet: http.get,
+    httpGlobalAgent: http.globalAgent,
+    httpsRequest: https.request,
+    httpsGet: https.get,
+    httpsGlobalAgent: https.globalAgent,
+  };
+  const nodeAgent = createNodeProxyAgent(proxyUrl, proxyCa);
+  const originalDispatcher = getGlobalDispatcher();
+  const runtime: RuntimeInstall = {
+    nodeAgent,
+    originalDispatcher,
+    snapshot,
+  };
+  activeRuntime = runtime;
+  try {
+    http.globalAgent = nodeAgent;
+    https.globalAgent = nodeAgent;
+    http.request = bindNodeHttpMethod(snapshot.httpRequest, nodeAgent);
+    http.get = bindNodeHttpMethod(snapshot.httpGet, nodeAgent);
+    https.request = bindNodeHttpMethod(snapshot.httpsRequest, nodeAgent);
+    https.get = bindNodeHttpMethod(snapshot.httpsGet, nodeAgent);
+    setGlobalDispatcher(createUndiciProxyDispatcher(proxyUrl, proxyCa));
+  } catch (error) {
+    activeRuntime = undefined;
+    nodeAgent.destroy();
+    throw error;
+  }
+  return runtime;
+}
+
+function stopRuntime(runtime: RuntimeInstall): void {
+  if (activeRuntime !== runtime) {
+    return;
+  }
+  http.request = runtime.snapshot.httpRequest;
+  http.get = runtime.snapshot.httpGet;
+  http.globalAgent = runtime.snapshot.httpGlobalAgent;
+  https.request = runtime.snapshot.httpsRequest;
+  https.get = runtime.snapshot.httpsGet;
+  https.globalAgent = runtime.snapshot.httpsGlobalAgent;
+  setGlobalDispatcher(runtime.originalDispatcher);
+  runtime.nodeAgent.destroy();
+  activeRuntime = undefined;
 }
 
 export function installProxyline(options: ProxylineOptions): ProxylineHandle {
@@ -112,7 +255,9 @@ export function installProxyline(options: ProxylineOptions): ProxylineHandle {
   }
 
   let stopped = false;
+  const proxyCa = resolveProxyTlsCa(options.proxyTls);
   const redactedProxyUrl = proxyUrl ? redactProxyUrl(proxyUrl) : undefined;
+  const runtime = proxyUrl !== undefined ? installRuntime(proxyUrl.href, proxyCa) : undefined;
   const hasActiveProxy = redactedProxyUrl !== undefined;
   emit(options.onEvent, {
     type: "runtime.installed",
@@ -125,6 +270,19 @@ export function installProxyline(options: ProxylineOptions): ProxylineHandle {
     mode: options.mode,
     active: hasActiveProxy,
     ...(redactedProxyUrl ? { proxyUrl: redactedProxyUrl } : {}),
+    createNodeAgent: () => {
+      if (proxyUrl === undefined) {
+        return new http.Agent();
+      }
+      return createNodeProxyAgent(proxyUrl.href, proxyCa);
+    },
+    createUndiciDispatcher: () => createUndiciProxyDispatcher(proxyUrl?.href, proxyCa),
+    createWebSocketAgent: () => {
+      if (proxyUrl === undefined) {
+        return new http.Agent();
+      }
+      return createNodeProxyAgent(proxyUrl.href, proxyCa);
+    },
     explain: (url, explainOptions) => {
       const decision: ProxylineDecision =
         stopped || redactedProxyUrl === undefined
@@ -149,6 +307,9 @@ export function installProxyline(options: ProxylineOptions): ProxylineHandle {
         return;
       }
       stopped = true;
+      if (runtime !== undefined) {
+        stopRuntime(runtime);
+      }
       emit(options.onEvent, { type: "runtime.stopped", mode: options.mode });
     },
   };
