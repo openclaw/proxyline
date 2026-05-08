@@ -1,0 +1,42 @@
+{
+  "name": "@jesse-merhi/proxyline",
+  "version": "0.0.0",
+  "description": "Process-global proxy routing for Node.js.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Jesse Merhi",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/jesse-merhi/proxyline.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jesse-merhi/proxyline/issues"
+  },
+  "homepage": "https://github.com/jesse-merhi/proxyline#readme",
+  "packageManager": "pnpm@10.33.0",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "pnpm typecheck && pnpm test && pnpm build",
+    "test": "tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.25",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
