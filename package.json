@@ -33,6 +33,7 @@
     "build": "tsc -p tsconfig.build.json",
     "check": "pnpm typecheck && pnpm test && pnpm build",
     "package:dry-run": "pnpm pack --dry-run",
+    "prepare": "pnpm build",
     "publish:dry-run": "pnpm publish --dry-run --access public",
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
