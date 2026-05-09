@@ -5,6 +5,10 @@
   "type": "module",
   "license": "MIT",
   "author": "Jesse Merhi",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "repository": {
     "type": "git",
     "url": "git+ssh://git@github.com/jesse-merhi/proxyline.git"
@@ -28,6 +32,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "check": "pnpm typecheck && pnpm test && pnpm build",
+    "package:dry-run": "pnpm pack --dry-run",
+    "publish:dry-run": "pnpm publish --dry-run --access public",
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },

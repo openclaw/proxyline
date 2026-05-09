@@ -12,7 +12,26 @@ export type ProxyTestCertificate = {
   cleanup: () => Promise<void>;
 };
 
-const opensslConfig = `[req]
+export type ProxyTestCertificateOptions = {
+  dnsNames?: string[];
+  ipAddresses?: string[];
+};
+
+function buildSubjectAltNames(options: ProxyTestCertificateOptions): string {
+  const dnsNames = options.dnsNames ?? ["localhost"];
+  const ipAddresses = options.ipAddresses ?? ["127.0.0.1"];
+  const entries: string[] = [];
+  for (const [index, ipAddress] of ipAddresses.entries()) {
+    entries.push(`IP.${index + 1} = ${ipAddress}`);
+  }
+  for (const [index, dnsName] of dnsNames.entries()) {
+    entries.push(`DNS.${index + 1} = ${dnsName}`);
+  }
+  return entries.join("\n");
+}
+
+function buildOpenSslConfig(options: ProxyTestCertificateOptions): string {
+  return `[req]
 distinguished_name = dn
 x509_extensions = v3_req
 prompt = no
@@ -23,18 +42,20 @@ keyUsage = critical, digitalSignature, keyEncipherment
 extendedKeyUsage = serverAuth
 subjectAltName = @alt_names
 [alt_names]
-IP.1 = 127.0.0.1
-DNS.1 = localhost
+${buildSubjectAltNames(options)}
 `;
+}
 
-export async function createProxyTestCertificate(): Promise<ProxyTestCertificate> {
+export async function createProxyTestCertificate(
+  options: ProxyTestCertificateOptions = {},
+): Promise<ProxyTestCertificate> {
   const directory = await mkdtemp(join(tmpdir(), "proxyline-cert-"));
   const configPath = join(directory, "openssl.cnf");
   const keyPath = join(directory, "proxy-key.pem");
   const certificatePath = join(directory, "proxy-cert.pem");
 
   try {
-    await writeFile(configPath, opensslConfig, "utf8");
+    await writeFile(configPath, buildOpenSslConfig(options), "utf8");
     await execFileAsync("openssl", [
       "req",
       "-x509",

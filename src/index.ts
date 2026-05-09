@@ -1,9 +1,11 @@
 import http from "node:http";
 import https from "node:https";
+import net from "node:net";
 import { ProxyAgent as NodeProxyAgent } from "proxy-agent";
 import {
   Agent as UndiciAgent,
   type Dispatcher,
+  EnvHttpProxyAgent,
   getGlobalDispatcher,
   ProxyAgent as UndiciProxyAgent,
   setGlobalDispatcher,
@@ -106,11 +108,36 @@ function formatUrl(value: string | URL): string {
   return value instanceof URL ? value.href : new URL(value).href;
 }
 
-type NodeHttpRequestOptions = http.RequestOptions & {
+type NodeHttpRequestOptions = http.RequestOptions & https.RequestOptions & {
   agent?: http.Agent | false;
 };
 
 type NodeHttpMethod = typeof http.request;
+type NodeAgentFactory = (options: NodeHttpRequestOptions) => http.Agent;
+type NodeAgentOptions = http.AgentOptions & https.AgentOptions;
+type NodeAgentWithOptions = http.Agent & {
+  options?: NodeAgentOptions;
+};
+
+const CALLER_AGENT_TLS_OPTION_KEYS = [
+  "ca",
+  "cert",
+  "ciphers",
+  "clientCertEngine",
+  "crl",
+  "dhparam",
+  "ecdhCurve",
+  "honorCipherOrder",
+  "key",
+  "maxVersion",
+  "minVersion",
+  "passphrase",
+  "pfx",
+  "rejectUnauthorized",
+  "secureOptions",
+  "secureProtocol",
+  "sessionIdContext",
+] as const;
 
 type NodeHttpStackSnapshot = {
   httpRequest: typeof http.request;
@@ -129,6 +156,36 @@ type RuntimeInstall = {
 
 let activeRuntime: RuntimeInstall | undefined;
 
+type ProxyEnvKey =
+  | "HTTP_PROXY"
+  | "HTTPS_PROXY"
+  | "ALL_PROXY"
+  | "NO_PROXY"
+  | "http_proxy"
+  | "https_proxy"
+  | "all_proxy"
+  | "no_proxy";
+type LowerProxyEnvKey = "http_proxy" | "https_proxy" | "all_proxy" | "no_proxy";
+type ProxyEnvSnapshot = Readonly<Record<ProxyEnvKey, string | undefined>>;
+
+type ProxyResolver = Readonly<{
+  active: boolean;
+  describeProxy: () => string | undefined;
+  explain: (url: string | URL, surface: ProxylineSurface) => ProxylineDecision;
+  getProxyForUrl: (url: string) => string;
+}>;
+
+const EMPTY_PROXY_ENV: ProxyEnvSnapshot = {
+  HTTP_PROXY: undefined,
+  HTTPS_PROXY: undefined,
+  ALL_PROXY: undefined,
+  NO_PROXY: undefined,
+  http_proxy: undefined,
+  https_proxy: undefined,
+  all_proxy: undefined,
+  no_proxy: undefined,
+};
+
 function copyNodeHttpOptions(value: unknown): NodeHttpRequestOptions {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return {};
@@ -136,9 +193,58 @@ function copyNodeHttpOptions(value: unknown): NodeHttpRequestOptions {
   return { ...(value as NodeHttpRequestOptions) };
 }
 
+function readAgentOptions(agent: http.Agent | false | undefined): NodeAgentOptions | undefined {
+  if (agent === undefined || agent === false) {
+    return undefined;
+  }
+  return (agent as NodeAgentWithOptions).options;
+}
+
+function preserveCallerAgentOptions(options: NodeHttpRequestOptions): void {
+  const agentOptions = readAgentOptions(options.agent);
+  if (agentOptions === undefined) {
+    return;
+  }
+  for (const key of CALLER_AGENT_TLS_OPTION_KEYS) {
+    const value = agentOptions[key];
+    if (value !== undefined && options[key as keyof NodeHttpRequestOptions] === undefined) {
+      options[key as keyof NodeHttpRequestOptions] = value as never;
+    }
+  }
+}
+
+function inferDestinationHostname(url: string | URL | undefined, options: NodeHttpRequestOptions): string | undefined {
+  if (url !== undefined) {
+    return url instanceof URL ? url.hostname : new URL(url).hostname;
+  }
+  if (typeof options.hostname === "string") {
+    return options.hostname;
+  }
+  if (typeof options.host === "string") {
+    return options.host.replace(/:\d*$/, "");
+  }
+  return undefined;
+}
+
+function preserveDestinationTlsIdentity(
+  url: string | URL | undefined,
+  options: NodeHttpRequestOptions,
+): void {
+  if (options.servername !== undefined) {
+    return;
+  }
+  const hostname = inferDestinationHostname(url, options);
+  if (!hostname) {
+    return;
+  }
+  if (net.isIP(hostname) === 0) {
+    options.servername = hostname;
+  }
+}
+
 function bindNodeHttpMethod<TMethod extends NodeHttpMethod>(
   originalMethod: TMethod,
-  agent: http.Agent,
+  createAgent: NodeAgentFactory,
 ): TMethod {
   return ((...args: unknown[]) => {
     let url: string | URL | undefined;
@@ -159,42 +265,283 @@ function bindNodeHttpMethod<TMethod extends NodeHttpMethod>(
       callback = args[1];
     }
 
+    preserveCallerAgentOptions(options);
+    preserveDestinationTlsIdentity(url, options);
+    const agent = createAgent(options);
     options.agent = agent;
     if (url !== undefined) {
-      return originalMethod(url, options, callback as (res: http.IncomingMessage) => void);
+      const request = originalMethod(url, options, callback as (res: http.IncomingMessage) => void);
+      request.once("close", () => {
+        agent.destroy();
+      });
+      return request;
     }
-    return originalMethod(options, callback as (res: http.IncomingMessage) => void);
+    const request = originalMethod(options, callback as (res: http.IncomingMessage) => void);
+    request.once("close", () => {
+      agent.destroy();
+    });
+    return request;
   }) as TMethod;
 }
 
-function createNodeProxyAgent(proxyUrl: string, proxyCa: string | undefined): NodeProxyAgent {
-  return new NodeProxyAgent({
-    ...(proxyCa !== undefined ? { ca: proxyCa } : {}),
-    getProxyForUrl: (url: string) => {
+function readProxyEnv(): ProxyEnvSnapshot {
+  return {
+    HTTP_PROXY: process.env.HTTP_PROXY,
+    HTTPS_PROXY: process.env.HTTPS_PROXY,
+    ALL_PROXY: process.env.ALL_PROXY,
+    NO_PROXY: process.env.NO_PROXY,
+    http_proxy: process.env.http_proxy,
+    https_proxy: process.env.https_proxy,
+    all_proxy: process.env.all_proxy,
+    no_proxy: process.env.no_proxy,
+  };
+}
+
+function normalizeEnvValue(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function upperProxyEnvKey(key: LowerProxyEnvKey): ProxyEnvKey {
+  switch (key) {
+    case "http_proxy":
+      return "HTTP_PROXY";
+    case "https_proxy":
+      return "HTTPS_PROXY";
+    case "all_proxy":
+      return "ALL_PROXY";
+    case "no_proxy":
+      return "NO_PROXY";
+  }
+}
+
+function readProxyEnvValue(
+  env: ProxyEnvSnapshot,
+  key: LowerProxyEnvKey,
+): string | undefined {
+  return normalizeEnvValue(env[key]) ?? normalizeEnvValue(env[upperProxyEnvKey(key)]);
+}
+
+function proxyUrlWithDefaultScheme(proxyUrl: string, protocol: string): string {
+  return proxyUrl.includes("://") ? proxyUrl : `${protocol}://${proxyUrl}`;
+}
+
+function defaultPort(protocol: string): number {
+  if (protocol === "http:" || protocol === "ws:") {
+    return 80;
+  }
+  if (protocol === "https:" || protocol === "wss:") {
+    return 443;
+  }
+  return 0;
+}
+
+function matchesNoProxy(url: URL, env: ProxyEnvSnapshot): boolean {
+  const rawNoProxy = readProxyEnvValue(env, "no_proxy")?.toLowerCase();
+  if (!rawNoProxy) {
+    return false;
+  }
+  if (rawNoProxy === "*") {
+    return true;
+  }
+
+  const hostname = url.host.replace(/:\d*$/, "").toLowerCase();
+  const port = Number.parseInt(url.port, 10) || defaultPort(url.protocol);
+  for (const rawEntry of rawNoProxy.split(/[,\s]/)) {
+    if (!rawEntry) {
+      continue;
+    }
+    const parsedEntry = rawEntry.match(/^(.+):(\d+)$/);
+    let entryHost = parsedEntry?.[1] ?? rawEntry;
+    const entryPort = parsedEntry?.[2] ? Number.parseInt(parsedEntry[2], 10) : 0;
+    if (entryPort && entryPort !== port) {
+      continue;
+    }
+
+    if (!/^[.*]/.test(entryHost)) {
+      if (hostname === entryHost) {
+        return true;
+      }
+      continue;
+    }
+    if (entryHost.startsWith("*")) {
+      entryHost = entryHost.slice(1);
+    }
+    if (hostname.endsWith(entryHost)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function proxyEnvKeyForProtocol(protocol: string): LowerProxyEnvKey | undefined {
+  if (protocol === "http:" || protocol === "ws:") {
+    return "http_proxy";
+  }
+  if (protocol === "https:" || protocol === "wss:") {
+    return "https_proxy";
+  }
+  return undefined;
+}
+
+function resolveAmbientProxyForUrl(url: string | URL, env: ProxyEnvSnapshot): string | undefined {
+  let parsedUrl: URL;
+  try {
+    parsedUrl = url instanceof URL ? new URL(url.href) : new URL(url);
+  } catch {
+    return undefined;
+  }
+  const protocol = parsedUrl.protocol;
+  if (
+    protocol !== "http:" &&
+    protocol !== "https:" &&
+    protocol !== "ws:" &&
+    protocol !== "wss:"
+  ) {
+    return undefined;
+  }
+  if (matchesNoProxy(parsedUrl, env)) {
+    return undefined;
+  }
+  const protocolProxyKey = proxyEnvKeyForProtocol(protocol);
+  if (protocolProxyKey === undefined) {
+    return undefined;
+  }
+  const proxy =
+    readProxyEnvValue(env, protocolProxyKey) ?? readProxyEnvValue(env, "all_proxy");
+  return proxy ? proxyUrlWithDefaultScheme(proxy, protocol.slice(0, -1)) : undefined;
+}
+
+function createManagedProxyResolver(proxyUrl: URL): ProxyResolver {
+  const redactedProxyUrl = redactProxyUrl(proxyUrl);
+  return {
+    active: true,
+    describeProxy: () => redactedProxyUrl,
+    explain: (url, surface) => ({
+      kind: "proxied",
+      reason: "managed-proxy-active",
+      surface,
+      url: formatUrl(url),
+      proxyUrl: redactedProxyUrl,
+    }),
+    getProxyForUrl: (url) => {
       const protocol = new URL(url).protocol;
-      return protocol === "http:" || protocol === "https:" || protocol === "ws:" || protocol === "wss:"
-        ? proxyUrl
+      return protocol === "http:" ||
+        protocol === "https:" ||
+        protocol === "ws:" ||
+        protocol === "wss:"
+        ? proxyUrl.href
         : "";
     },
+  };
+}
+
+function createAmbientProxyResolver(env: ProxyEnvSnapshot): ProxyResolver {
+  const configuredProxy =
+    readProxyEnvValue(env, "http_proxy") ??
+    readProxyEnvValue(env, "https_proxy") ??
+    readProxyEnvValue(env, "all_proxy");
+  return {
+    active: configuredProxy !== undefined,
+    describeProxy: () =>
+      configuredProxy
+        ? redactProxyUrl(proxyUrlWithDefaultScheme(configuredProxy, "http"))
+        : undefined,
+    explain: (url, surface) => {
+      const formattedUrl = formatUrl(url);
+      const proxyUrl = resolveAmbientProxyForUrl(formattedUrl, env);
+      if (proxyUrl !== undefined) {
+        return {
+          kind: "proxied",
+          reason: "ambient-proxy-active",
+          surface,
+          url: formattedUrl,
+          proxyUrl: redactProxyUrl(proxyUrl),
+        };
+      }
+      return {
+        kind: "direct",
+        reason: matchesNoProxy(new URL(formattedUrl), env)
+          ? "no-proxy-match"
+          : "ambient-proxy-not-configured",
+        surface,
+        url: formattedUrl,
+      };
+    },
+    getProxyForUrl: (url) => resolveAmbientProxyForUrl(url, env) ?? "",
+  };
+}
+
+function createNodeProxyAgent(
+  resolver: ProxyResolver,
+  proxyCa: string | undefined,
+  options?: NodeHttpRequestOptions,
+): NodeProxyAgent {
+  return new NodeProxyAgent({
+    ...(proxyCa !== undefined ? { ca: proxyCa } : {}),
+    ...(options?.cert !== undefined ? { cert: options.cert } : {}),
+    ...(options?.ciphers !== undefined ? { ciphers: options.ciphers } : {}),
+    ...(options?.clientCertEngine !== undefined ? { clientCertEngine: options.clientCertEngine } : {}),
+    ...(options?.crl !== undefined ? { crl: options.crl } : {}),
+    ...(options?.dhparam !== undefined ? { dhparam: options.dhparam } : {}),
+    ...(options?.ecdhCurve !== undefined ? { ecdhCurve: options.ecdhCurve } : {}),
+    ...(options?.honorCipherOrder !== undefined ? { honorCipherOrder: options.honorCipherOrder } : {}),
+    ...(options?.key !== undefined ? { key: options.key } : {}),
+    ...(options?.maxVersion !== undefined ? { maxVersion: options.maxVersion } : {}),
+    ...(options?.minVersion !== undefined ? { minVersion: options.minVersion } : {}),
+    ...(options?.passphrase !== undefined ? { passphrase: options.passphrase } : {}),
+    ...(options?.pfx !== undefined ? { pfx: options.pfx } : {}),
+    ...(options?.rejectUnauthorized !== undefined ? { rejectUnauthorized: options.rejectUnauthorized } : {}),
+    ...(options?.secureOptions !== undefined ? { secureOptions: options.secureOptions } : {}),
+    ...(options?.secureProtocol !== undefined ? { secureProtocol: options.secureProtocol } : {}),
+    ...(options?.servername !== undefined ? { servername: options.servername } : {}),
+    ...(options?.sessionIdContext !== undefined ? { sessionIdContext: options.sessionIdContext } : {}),
+    getProxyForUrl: resolver.getProxyForUrl,
     httpAgent: new http.Agent(),
     httpsAgent: new https.Agent(),
   });
 }
 
 function createUndiciProxyDispatcher(
-  proxyUrl: string | undefined,
+  options:
+    | { mode: "managed"; proxyUrl: string }
+    | { mode: "ambient"; env: ProxyEnvSnapshot; active: boolean },
   proxyCa: string | undefined,
 ): Dispatcher {
-  if (proxyUrl === undefined) {
-    return new UndiciAgent();
+  if (options.mode === "ambient") {
+    if (!options.active) {
+      return new UndiciAgent();
+    }
+    const rawHttpProxy =
+      readProxyEnvValue(options.env, "http_proxy") ?? readProxyEnvValue(options.env, "all_proxy");
+    const rawHttpsProxy =
+      readProxyEnvValue(options.env, "https_proxy") ??
+      readProxyEnvValue(options.env, "all_proxy");
+    const noProxy = readProxyEnvValue(options.env, "no_proxy");
+    return new EnvHttpProxyAgent({
+      ...(rawHttpProxy !== undefined
+        ? { httpProxy: proxyUrlWithDefaultScheme(rawHttpProxy, "http") }
+        : {}),
+      ...(rawHttpsProxy !== undefined
+        ? { httpsProxy: proxyUrlWithDefaultScheme(rawHttpsProxy, "https") }
+        : {}),
+      ...(noProxy !== undefined ? { noProxy } : {}),
+      ...(proxyCa !== undefined ? { proxyTls: { ca: proxyCa } } : {}),
+    });
   }
   return new UndiciProxyAgent({
-    uri: proxyUrl,
+    uri: options.proxyUrl,
     ...(proxyCa !== undefined ? { proxyTls: { ca: proxyCa } } : {}),
   });
 }
 
-function installRuntime(proxyUrl: string, proxyCa: string | undefined): RuntimeInstall {
+function installRuntime(
+  resolver: ProxyResolver,
+  dispatcherOptions:
+    | { mode: "managed"; proxyUrl: string }
+    | { mode: "ambient"; env: ProxyEnvSnapshot; active: boolean },
+  proxyCa: string | undefined,
+): RuntimeInstall {
   if (activeRuntime !== undefined) {
     throw new ProxylineError("RUNTIME_ALREADY_ACTIVE", "Proxyline already has an active runtime.");
   }
@@ -206,7 +553,7 @@ function installRuntime(proxyUrl: string, proxyCa: string | undefined): RuntimeI
     httpsGet: https.get,
     httpsGlobalAgent: https.globalAgent,
   };
-  const nodeAgent = createNodeProxyAgent(proxyUrl, proxyCa);
+  const nodeAgent = createNodeProxyAgent(resolver, proxyCa);
   const originalDispatcher = getGlobalDispatcher();
   const runtime: RuntimeInstall = {
     nodeAgent,
@@ -217,11 +564,19 @@ function installRuntime(proxyUrl: string, proxyCa: string | undefined): RuntimeI
   try {
     http.globalAgent = nodeAgent;
     https.globalAgent = nodeAgent;
-    http.request = bindNodeHttpMethod(snapshot.httpRequest, nodeAgent);
-    http.get = bindNodeHttpMethod(snapshot.httpGet, nodeAgent);
-    https.request = bindNodeHttpMethod(snapshot.httpsRequest, nodeAgent);
-    https.get = bindNodeHttpMethod(snapshot.httpsGet, nodeAgent);
-    setGlobalDispatcher(createUndiciProxyDispatcher(proxyUrl, proxyCa));
+    http.request = bindNodeHttpMethod(snapshot.httpRequest, (options) =>
+      createNodeProxyAgent(resolver, proxyCa, options),
+    );
+    http.get = bindNodeHttpMethod(snapshot.httpGet, (options) =>
+      createNodeProxyAgent(resolver, proxyCa, options),
+    );
+    https.request = bindNodeHttpMethod(snapshot.httpsRequest, (options) =>
+      createNodeProxyAgent(resolver, proxyCa, options),
+    );
+    https.get = bindNodeHttpMethod(snapshot.httpsGet, (options) =>
+      createNodeProxyAgent(resolver, proxyCa, options),
+    );
+    setGlobalDispatcher(createUndiciProxyDispatcher(dispatcherOptions, proxyCa));
   } catch (error) {
     activeRuntime = undefined;
     nodeAgent.destroy();
@@ -256,9 +611,22 @@ export function installProxyline(options: ProxylineOptions): ProxylineHandle {
 
   let stopped = false;
   const proxyCa = resolveProxyTlsCa(options.proxyTls);
-  const redactedProxyUrl = proxyUrl ? redactProxyUrl(proxyUrl) : undefined;
-  const runtime = proxyUrl !== undefined ? installRuntime(proxyUrl.href, proxyCa) : undefined;
-  const hasActiveProxy = redactedProxyUrl !== undefined;
+  const ambientEnv = proxyUrl === undefined ? readProxyEnv() : undefined;
+  const resolver =
+    proxyUrl !== undefined
+      ? createManagedProxyResolver(proxyUrl)
+      : createAmbientProxyResolver(ambientEnv ?? EMPTY_PROXY_ENV);
+  const redactedProxyUrl = resolver.describeProxy();
+  const hasActiveProxy = resolver.active;
+  const runtime = hasActiveProxy
+    ? installRuntime(
+        resolver,
+        proxyUrl !== undefined
+          ? { mode: "managed", proxyUrl: proxyUrl.href }
+          : { mode: "ambient", env: ambientEnv ?? EMPTY_PROXY_ENV, active: hasActiveProxy },
+        proxyCa,
+      )
+    : undefined;
   emit(options.onEvent, {
     type: "runtime.installed",
     mode: options.mode,
@@ -271,34 +639,34 @@ export function installProxyline(options: ProxylineOptions): ProxylineHandle {
     active: hasActiveProxy,
     ...(redactedProxyUrl ? { proxyUrl: redactedProxyUrl } : {}),
     createNodeAgent: () => {
-      if (proxyUrl === undefined) {
+      if (!hasActiveProxy) {
         return new http.Agent();
       }
-      return createNodeProxyAgent(proxyUrl.href, proxyCa);
+      return createNodeProxyAgent(resolver, proxyCa);
     },
-    createUndiciDispatcher: () => createUndiciProxyDispatcher(proxyUrl?.href, proxyCa),
+    createUndiciDispatcher: () =>
+      createUndiciProxyDispatcher(
+        proxyUrl !== undefined
+          ? { mode: "managed", proxyUrl: proxyUrl.href }
+          : { mode: "ambient", env: ambientEnv ?? EMPTY_PROXY_ENV, active: hasActiveProxy },
+        proxyCa,
+      ),
     createWebSocketAgent: () => {
-      if (proxyUrl === undefined) {
+      if (!hasActiveProxy) {
         return new http.Agent();
       }
-      return createNodeProxyAgent(proxyUrl.href, proxyCa);
+      return createNodeProxyAgent(resolver, proxyCa);
     },
     explain: (url, explainOptions) => {
       const decision: ProxylineDecision =
-        stopped || redactedProxyUrl === undefined
+        stopped
           ? {
               kind: "direct",
-              reason: stopped ? "runtime-stopped" : "ambient-proxy-not-configured",
+              reason: "runtime-stopped",
               surface: explainOptions?.surface ?? "unknown",
               url: formatUrl(url),
             }
-          : {
-              kind: "proxied",
-              reason: options.mode === "managed" ? "managed-proxy-active" : "ambient-proxy-active",
-              surface: explainOptions?.surface ?? "unknown",
-              url: formatUrl(url),
-              proxyUrl: redactedProxyUrl,
-            };
+          : resolver.explain(url, explainOptions?.surface ?? "unknown");
       emit(options.onEvent, { type: "decision", decision });
       return decision;
     },

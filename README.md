@@ -12,13 +12,16 @@ The API models two safety postures:
 - `managed`: proxy routing is a security policy. Setup failures must fail
   closed instead of silently going direct.
 - `ambient`: respect ordinary `HTTP_PROXY` / `HTTPS_PROXY` style environment
-  configuration as best-effort compatibility. This mode is currently only a
-  non-active diagnostic posture unless a proxy URL is passed explicitly.
+  configuration as best-effort compatibility. Direct egress remains allowed
+  when no environment proxy applies, but `explain()` reports why.
 
 ## Coverage
 
 - Managed mode installs a process-global proxy runtime for Node
   `http.request`, `http.get`, `https.request`, and `https.get`.
+- Ambient mode installs the same Node and undici/fetch runtime when
+  `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, or lowercase variants are set, and
+  honors `NO_PROXY` / `no_proxy` bypasses.
 - Caller-provided Node HTTP agents are replaced in managed mode, so ordinary
   per-request direct agents do not bypass the configured proxy.
 - Process-global undici/fetch routing is installed with `setGlobalDispatcher`.

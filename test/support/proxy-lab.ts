@@ -6,7 +6,15 @@ import { AddressInfo } from "node:net";
 import { createProxyTestCertificate } from "./proxy-cert.js";
 
 export type ProxyLabOptions = {
+  proxyHost?: "127.0.0.1" | "localhost";
+  requiredProxyAuthorization?: string;
   secureProxy?: boolean;
+  secureTarget?: boolean;
+  targetHost?: "127.0.0.1" | "localhost";
+  targetCertificateNames?: {
+    dnsNames?: string[];
+    ipAddresses?: string[];
+  };
 };
 
 export type ProxyLabEvent =
@@ -51,6 +59,7 @@ export type ProxyLab = {
   proxyUrl: string;
   proxyCa?: string;
   targetUrl: string;
+  targetCa?: string;
   events: ProxyLabEvent[];
   allowLoopbackAuthority: (authority: string) => void;
   close: () => Promise<void>;
@@ -75,6 +84,9 @@ function closeServer(server: LabServer): Promise<void> {
       }
       resolve();
     });
+    if ("closeAllConnections" in server && typeof server.closeAllConnections === "function") {
+      server.closeAllConnections();
+    }
   });
 }
 
@@ -92,8 +104,16 @@ export async function startProxyLab(options: ProxyLabOptions = {}): Promise<Prox
   const events: ProxyLabEvent[] = [];
   const denyPaths = new Set(["/denied"]);
   const allowLoopbackAuthorities = new Set<string>();
+  const sockets = new Set<net.Socket>();
 
-  const target = http.createServer((req, res) => {
+  const trackSocket = (socket: net.Socket): void => {
+    sockets.add(socket);
+    socket.once("close", () => {
+      sockets.delete(socket);
+    });
+  };
+
+  const onTargetRequest: http.RequestListener = (req, res) => {
     if (req.url === "/allowed") {
       res.writeHead(200, { "content-type": "text/plain" });
       res.end("allowed via target\n");
@@ -106,13 +126,41 @@ export async function startProxyLab(options: ProxyLabOptions = {}): Promise<Prox
     }
     res.writeHead(200, { "content-type": "text/plain" });
     res.end("target default\n");
-  });
-  const targetAddress = await listen(target);
-  const targetAuthority = `127.0.0.1:${targetAddress.port}`;
+  };
+  const targetCertificate = options.secureTarget
+    ? await createProxyTestCertificate(options.targetCertificateNames)
+    : undefined;
+  const target = options.secureTarget
+    ? https.createServer(
+        {
+          cert: targetCertificate?.certificate,
+          key: targetCertificate?.privateKey,
+        },
+        onTargetRequest,
+      )
+    : http.createServer(onTargetRequest);
+  const targetHost = options.targetHost ?? "127.0.0.1";
+  const targetAddress = await listen(target, targetHost);
+  const targetAuthority = `${targetHost}:${targetAddress.port}`;
   allowLoopbackAuthorities.add(targetAuthority);
   allowLoopbackAuthorities.add(`localhost:${targetAddress.port}`);
 
   const onProxyRequest: http.RequestListener = (clientReq, clientRes) => {
+    if (
+      options.requiredProxyAuthorization !== undefined &&
+      clientReq.headers["proxy-authorization"] !== options.requiredProxyAuthorization
+    ) {
+      clientReq.resume();
+      clientRes.writeHead(407, { "content-type": "text/plain" });
+      clientRes.end("proxy authentication required\n");
+      events.push({
+        type: "error",
+        message: "missing or invalid proxy authorization",
+        ...(clientReq.url !== undefined ? { url: clientReq.url } : {}),
+      });
+      return;
+    }
+
     const rawUrl = clientReq.url ?? "";
     let targetUrl: URL;
     try {
@@ -126,6 +174,14 @@ export async function startProxyLab(options: ProxyLabOptions = {}): Promise<Prox
     }
 
     events.push({ type: "request", method: clientReq.method, url: targetUrl.toString() });
+
+    if (targetUrl.protocol === "https:" && targetUrl.pathname === "/graphql") {
+      clientReq.resume();
+      clientRes.writeHead(418, { "content-type": "text/plain" });
+      clientRes.end("observed absolute https proxy request\n");
+      events.push({ type: "allow", status: 418, url: targetUrl.toString() });
+      return;
+    }
 
     if (denyPaths.has(targetUrl.pathname)) {
       clientReq.resume();
@@ -176,10 +232,20 @@ export async function startProxyLab(options: ProxyLabOptions = {}): Promise<Prox
   };
 
   const onProxyConnect = (clientReq: http.IncomingMessage, clientSocket: net.Socket, head: Buffer): void => {
+    trackSocket(clientSocket);
     const authority = clientReq.url ?? "";
     const [targetHost, targetPortText = "80"] = authority.split(":");
     const targetPort = Number(targetPortText);
     events.push({ type: "connect", authority });
+
+    if (
+      options.requiredProxyAuthorization !== undefined &&
+      clientReq.headers["proxy-authorization"] !== options.requiredProxyAuthorization
+    ) {
+      clientSocket.end("HTTP/1.1 407 Proxy Authentication Required\r\n\r\n");
+      events.push({ type: "error", message: "missing or invalid proxy authorization", authority });
+      return;
+    }
 
     if (!targetHost || !Number.isInteger(targetPort) || targetPort <= 0) {
       clientSocket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
@@ -203,6 +269,7 @@ export async function startProxyLab(options: ProxyLabOptions = {}): Promise<Prox
     const relayToUpstream = (path: string): void => {
       decided = true;
       const nextUpstreamSocket = net.connect(targetPort, targetHost, () => {
+        trackSocket(nextUpstreamSocket);
         upstreamReady = true;
         events.push({ type: "allow_connect", authority, path });
         for (const pending of pendingChunks) {
@@ -293,20 +360,25 @@ export async function startProxyLab(options: ProxyLabOptions = {}): Promise<Prox
     : http.createServer(onProxyRequest);
   proxy.on("connect", onProxyConnect);
 
-  const proxyHost = options.secureProxy ? "localhost" : "127.0.0.1";
+  const proxyHost = options.proxyHost ?? (options.secureProxy ? "localhost" : "127.0.0.1");
   const proxyAddress = await listen(proxy, proxyHost);
 
   return {
     proxyUrl: `${options.secureProxy ? "https" : "http"}://${proxyHost}:${proxyAddress.port}`,
     ...(proxyCertificate !== undefined ? { proxyCa: proxyCertificate.certificate } : {}),
-    targetUrl: `http://127.0.0.1:${targetAddress.port}`,
+    targetUrl: `${options.secureTarget ? "https" : "http"}://${targetHost}:${targetAddress.port}`,
+    ...(targetCertificate !== undefined ? { targetCa: targetCertificate.certificate } : {}),
     events,
     allowLoopbackAuthority: (authority) => {
       allowLoopbackAuthorities.add(authority);
     },
     close: async () => {
+      for (const socket of sockets) {
+        socket.destroy();
+      }
       await Promise.all([closeServer(proxy), closeServer(target)]);
       await proxyCertificate?.cleanup();
+      await targetCertificate?.cleanup();
     },
   };
 }
