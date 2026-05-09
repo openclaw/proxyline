@@ -474,6 +474,37 @@ test("websocket helper routes ws clients through the lab proxy", async () => {
   }
 });
 
+test("managed mode routes ws clients through the global node:http patch", async () => {
+  const lab = await startProxyLab();
+  const wsServer = await createWebSocketServer();
+  const deniedUrl = new URL(wsServer.url);
+  deniedUrl.pathname = "/denied";
+  lab.allowLoopbackAuthority(deniedUrl.host);
+  const proxy = installGlobalProxy({ mode: "managed", proxyUrl: lab.proxyUrl });
+  try {
+    const ws = new WebSocket(deniedUrl.href);
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", () => {
+        reject(new Error("websocket opened directly instead of being denied by the proxy"));
+      });
+      ws.once("error", () => {
+        resolve();
+      });
+    });
+
+    assert.ok(
+      lab.events.some(
+        (event) =>
+          event.type === "deny_connect" && event.authority === deniedUrl.host && event.path === "/denied",
+      ),
+    );
+  } finally {
+    proxy.stop();
+    await wsServer.close();
+    await lab.close();
+  }
+});
+
 test("CONNECT helper trusts an HTTPS proxy endpoint with scoped CA", async () => {
   const lab = await startProxyLab({ secureProxy: true });
   const proxyCa = lab.proxyCa;

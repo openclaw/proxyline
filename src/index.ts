@@ -269,6 +269,7 @@ function bindNodeHttpMethod<TMethod extends NodeHttpMethod>(
     preserveDestinationTlsIdentity(url, options);
     const agent = createAgent(options);
     options.agent = agent;
+    delete options.createConnection;
     if (url !== undefined) {
       const request = originalMethod(url, options, callback as (res: http.IncomingMessage) => void);
       request.once("close", () => {
