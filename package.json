@@ -1,6 +1,6 @@
 {
-  "name": "@jesse-merhi/proxyline",
-  "version": "0.0.0",
+  "name": "@openclaw/proxyline",
+  "version": "0.1.0",
   "description": "Process-global proxy routing for Node.js.",
   "type": "module",
   "license": "MIT",
@@ -11,13 +11,13 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/jesse-merhi/proxyline.git"
+    "url": "git+https://github.com/openclaw/proxyline.git"
   },
   "bugs": {
-    "url": "https://github.com/jesse-merhi/proxyline/issues"
+    "url": "https://github.com/openclaw/proxyline/issues"
   },
-  "homepage": "https://github.com/jesse-merhi/proxyline#readme",
-  "packageManager": "pnpm@10.33.0",
+  "homepage": "https://github.com/openclaw/proxyline#readme",
+  "packageManager": "pnpm@10.33.2",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

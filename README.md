@@ -35,16 +35,14 @@ The API models two safety postures:
 
 ## Install
 
-Not published yet.
-
 ```bash
-pnpm add @jesse-merhi/proxyline
+pnpm add @openclaw/proxyline
 ```
 
 ## Usage Sketch
 
 ```ts
-import { installGlobalProxy } from "@jesse-merhi/proxyline";
+import { installGlobalProxy } from "@openclaw/proxyline";
 
 const proxy = installGlobalProxy({
   mode: "managed",
@@ -64,7 +62,7 @@ Pass the WebSocket helper to clients that expose a Node `agent` option:
 
 ```ts
 import WebSocket from "ws";
-import { installGlobalProxy } from "@jesse-merhi/proxyline";
+import { installGlobalProxy } from "@openclaw/proxyline";
 
 const proxy = installGlobalProxy({
   mode: "managed",
@@ -79,7 +77,7 @@ const socket = new WebSocket("wss://events.example.com/", {
 Open a scoped CONNECT tunnel when a library needs a socket instead of an agent:
 
 ```ts
-import { openProxyConnectTunnel } from "@jesse-merhi/proxyline";
+import { openProxyConnectTunnel } from "@openclaw/proxyline";
 
 const socket = await openProxyConnectTunnel({
   proxyUrl: "https://proxy.corp.example:8443",
