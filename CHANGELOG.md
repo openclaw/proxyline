@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.1.1 - Unreleased
+
 ## 0.1.0 - 2026-05-11
 
 - Initial public release of `@openclaw/proxyline` for process-global proxy routing in Node.js.
@@ -12,4 +14,3 @@
 - Added credential-safe proxy authorization handling for proxy URLs with userinfo.
 - Added in-process proxy lab coverage for HTTP, HTTPS, CONNECT, WebSocket, undici/fetch, proxy auth, loopback blocking, HTTPS proxies, TLS preservation, and IPv6 `NO_PROXY`.
 - Added full documentation for getting started, modes, surfaces, API reference, environment variables, proxy TLS, observability, security, troubleshooting, and testing.
-

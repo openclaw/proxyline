@@ -52,13 +52,19 @@ jobs:
       - name: Publish to npm
         shell: bash
         run: |
+          package="${{ steps.package.outputs.name }}@${{ steps.package.outputs.version }}"
+          if npm view "$package" version --registry https://registry.npmjs.org/ >/dev/null 2>&1; then
+            echo "::notice::$package is already published."
+            exit 0
+          fi
+
           set +e
           log="$RUNNER_TEMP/npm-publish.log"
           npm publish --access public --provenance >"$log" 2>&1
           status=$?
           cat "$log"
-          if [ "$status" -ne 0 ] && grep -Fq "previously published versions: ${{ steps.package.outputs.version }}" "$log"; then
-            echo "::notice::${{ steps.package.outputs.name }}@${{ steps.package.outputs.version }} is already published."
+          if [ "$status" -ne 0 ] && npm view "$package" version --registry https://registry.npmjs.org/ >/dev/null 2>&1; then
+            echo "::notice::$package is already published."
             exit 0
           fi
           exit "$status"
