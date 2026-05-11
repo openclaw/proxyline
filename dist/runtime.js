@@ -1,10 +1,13 @@
 import http from "node:http";
 import https from "node:https";
-import { Agent as UndiciAgent, Dispatcher, errors as undiciErrors, getGlobalDispatcher, ProxyAgent as UndiciProxyAgent, setGlobalDispatcher, } from "undici";
+import { Agent as UndiciAgent, Dispatcher, errors as undiciErrors, fetch as undiciFetch, getGlobalDispatcher, ProxyAgent as UndiciProxyAgent, setGlobalDispatcher, } from "undici";
 import { createAmbientProxyResolver, EMPTY_PROXY_ENV, resolveAmbientProxyForUrl, readProxyEnv, } from "./env.js";
 import { bindNodeHttpMethod, createDirectNodeAgent, createNodeProxyAgent, } from "./node-http.js";
 import { formatUrl, ProxylineError, redactProxyUrl, resolveProxyTlsCa, } from "./shared.js";
 let activeRuntime;
+// Node's global fetch types come from bundled undici-types, while the runtime
+// implementation intentionally delegates to this package's undici dependency.
+const proxylineFetch = undiciFetch;
 function normalizeProxyUrl(value) {
     if (value === undefined) {
         return undefined;
@@ -157,11 +160,13 @@ function installRuntime(resolver, dispatcherOptions, proxyCa) {
     };
     const nodeAgent = createNodeProxyAgent(resolver, proxyCa);
     const originalDispatcher = getGlobalDispatcher();
+    const originalFetch = globalThis.fetch;
     const installedDispatcher = createUndiciProxyDispatcher(dispatcherOptions, proxyCa);
     const runtime = {
         installedDispatcher,
         nodeAgent,
         originalDispatcher,
+        originalFetch,
         snapshot,
     };
     activeRuntime = runtime;
@@ -173,10 +178,12 @@ function installRuntime(resolver, dispatcherOptions, proxyCa) {
         https.request = bindNodeHttpMethod(snapshot.httpsRequest, () => createNodeProxyAgent(resolver, proxyCa));
         https.get = bindNodeHttpMethod(snapshot.httpsGet, () => createNodeProxyAgent(resolver, proxyCa));
         setGlobalDispatcher(installedDispatcher);
+        globalThis.fetch = proxylineFetch;
     }
     catch (error) {
         restoreNodeHttpSnapshot(snapshot);
         setGlobalDispatcher(originalDispatcher);
+        globalThis.fetch = originalFetch;
         activeRuntime = undefined;
         void installedDispatcher.destroy();
         nodeAgent.destroy();
@@ -190,6 +197,7 @@ function stopRuntime(runtime) {
     }
     restoreNodeHttpSnapshot(runtime.snapshot);
     setGlobalDispatcher(runtime.originalDispatcher);
+    globalThis.fetch = runtime.originalFetch;
     void runtime.installedDispatcher.destroy();
     runtime.nodeAgent.destroy();
     activeRuntime = undefined;

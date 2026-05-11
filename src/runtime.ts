@@ -5,6 +5,7 @@ import {
   Agent as UndiciAgent,
   Dispatcher,
   errors as undiciErrors,
+  fetch as undiciFetch,
   getGlobalDispatcher,
   ProxyAgent as UndiciProxyAgent,
   setGlobalDispatcher,
@@ -39,10 +40,15 @@ type RuntimeInstall = {
   installedDispatcher: Dispatcher;
   nodeAgent: NodeProxyAgent;
   originalDispatcher: Dispatcher;
+  originalFetch: typeof globalThis.fetch;
   snapshot: NodeHttpStackSnapshot;
 };
 
 let activeRuntime: RuntimeInstall | undefined;
+
+// Node's global fetch types come from bundled undici-types, while the runtime
+// implementation intentionally delegates to this package's undici dependency.
+const proxylineFetch = undiciFetch as unknown as typeof globalThis.fetch;
 
 function normalizeProxyUrl(value: string | URL | undefined): URL | undefined {
   if (value === undefined) {
@@ -236,11 +242,13 @@ function installRuntime(
   };
   const nodeAgent = createNodeProxyAgent(resolver, proxyCa);
   const originalDispatcher = getGlobalDispatcher();
+  const originalFetch = globalThis.fetch;
   const installedDispatcher = createUndiciProxyDispatcher(dispatcherOptions, proxyCa);
   const runtime: RuntimeInstall = {
     installedDispatcher,
     nodeAgent,
     originalDispatcher,
+    originalFetch,
     snapshot,
   };
   activeRuntime = runtime;
@@ -260,9 +268,11 @@ function installRuntime(
       createNodeProxyAgent(resolver, proxyCa),
     );
     setGlobalDispatcher(installedDispatcher);
+    globalThis.fetch = proxylineFetch;
   } catch (error) {
     restoreNodeHttpSnapshot(snapshot);
     setGlobalDispatcher(originalDispatcher);
+    globalThis.fetch = originalFetch;
     activeRuntime = undefined;
     void installedDispatcher.destroy();
     nodeAgent.destroy();
@@ -277,6 +287,7 @@ function stopRuntime(runtime: RuntimeInstall): void {
   }
   restoreNodeHttpSnapshot(runtime.snapshot);
   setGlobalDispatcher(runtime.originalDispatcher);
+  globalThis.fetch = runtime.originalFetch;
   void runtime.installedDispatcher.destroy();
   runtime.nodeAgent.destroy();
   activeRuntime = undefined;

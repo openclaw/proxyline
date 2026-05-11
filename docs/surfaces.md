@@ -36,12 +36,12 @@ Some HTTP clients build absolute-form requests themselves (e.g. `path: "https://
 
 ## undici and fetch
 
-`installGlobalProxy` calls `undici.setGlobalDispatcher` with:
+`installGlobalProxy` calls `undici.setGlobalDispatcher` and patches `globalThis.fetch` to use Proxyline's dispatcher with:
 
 - `undici.ProxyAgent` in managed mode, pointed at `proxyUrl` and trusting `proxyTls` when supplied.
 - Proxyline's ambient dispatcher in ambient mode, resolving each request against the current install-time `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` snapshot, with the same `proxyTls`.
 
-The original dispatcher is captured and restored on `stop()`.
+The original dispatcher and `globalThis.fetch` are captured and restored on `stop()`.
 
 ```ts
 import { fetch } from "undici";
@@ -109,4 +109,4 @@ To get a proxy-aware agent without going through the patched globals, use:
 
 Helper-created agents and dispatchers are caller-owned. Destroy or close them when the caller is done.
 
-When the runtime is inactive (ambient mode with no env proxy set), these helpers return plain agents/dispatchers that go direct.
+When the runtime is inactive (ambient mode with no env proxy set), these helpers return direct agents/dispatchers.

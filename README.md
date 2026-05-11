@@ -89,9 +89,9 @@ const socket = await openProxyConnectTunnel({
 | --- | --- | --- |
 | `http.request` / `http.get` | yes | global method patch + global agent swap |
 | `https.request` / `https.get` | yes | global method patch + global agent swap |
-| `fetch` / undici global dispatcher | yes | `setGlobalDispatcher` |
+| `fetch` / undici global dispatcher | yes | `globalThis.fetch` patch + `setGlobalDispatcher` |
 | WebSocket clients accepting a Node `agent` | yes | `proxy.createWebSocketAgent()` |
-| Caller-built `http.Agent` / `https.Agent` | overridden in managed mode | TLS options preserved |
+| Caller-built `http.Agent` / `https.Agent` | overridden in managed and active ambient mode | TLS options preserved |
 | Explicit HTTP CONNECT socket | yes | `openProxyConnectTunnel()` |
 | Raw `net.connect` / `tls.connect` | no | out of scope, see [Security](./docs/security.md) |
 | Native or private transport stacks | no | out of scope, see [Security](./docs/security.md) |
