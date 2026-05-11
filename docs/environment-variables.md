@@ -6,11 +6,11 @@ Ambient mode reads its configuration from the environment at install time. Manag
 
 | Variable | Used for | Notes |
 | --- | --- | --- |
-| `HTTP_PROXY` | proxy for `http:` and `ws:` URLs | upper case wins over lower |
+| `HTTP_PROXY` | proxy for `http:` and `ws:` URLs | lower case wins when both are set |
 | `HTTPS_PROXY` | proxy for `https:` and `wss:` URLs | |
 | `ALL_PROXY` | fallback when the protocol-specific variable is unset | |
 | `NO_PROXY` | comma- or whitespace-separated list of exemptions | matched against the destination URL |
-| `http_proxy` | lowercase alias for `HTTP_PROXY` | upper case wins when both are set |
+| `http_proxy` | lowercase alias for `HTTP_PROXY` | takes precedence over uppercase |
 | `https_proxy` | lowercase alias | |
 | `all_proxy` | lowercase alias | |
 | `no_proxy` | lowercase alias | |
@@ -19,7 +19,7 @@ Empty or whitespace-only values are treated as unset.
 
 ## Activation
 
-The ambient runtime is **active** when any of `HTTP_PROXY`, `HTTPS_PROXY`, or `ALL_PROXY` (or their lowercase forms) is set to a non-empty value.
+The ambient runtime is **active** when any of `HTTP_PROXY`, `HTTPS_PROXY`, or `ALL_PROXY` (or their lowercase forms) is set to a supported `http://` or `https://` proxy endpoint. Bare endpoints count because Proxyline defaults them to `http://`.
 
 `NO_PROXY` alone does not activate the runtime. With only `NO_PROXY` set, `proxy.active` is `false` and Proxyline installs no patches.
 
@@ -67,4 +67,4 @@ export ALL_PROXY="http://gateway.corp:3128"        # used for both http and http
 
 ## Interaction with `fetch`
 
-The undici global dispatcher is installed as `EnvHttpProxyAgent` in ambient mode and is configured with the exact same `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` snapshot Proxyline read at install time. `fetch` and `node:http` therefore agree on the proxy decision for any URL.
+The undici global dispatcher is installed with Proxyline's own ambient resolver over the same `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` snapshot Proxyline read at install time. `fetch` and `node:http` therefore agree on the proxy decision for any URL.

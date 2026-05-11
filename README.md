@@ -4,9 +4,11 @@
 [![node](https://img.shields.io/node/v/%40openclaw%2Fproxyline.svg)](https://nodejs.org/)
 [![license](https://img.shields.io/npm/l/%40openclaw%2Fproxyline.svg)](./LICENSE)
 
-Process-global proxy routing for Node.js. One install replaces `node:http`, `node:https`, the undici/fetch global dispatcher, and routes WebSocket and explicit HTTP CONNECT traffic through the same policy.
+Process-global proxy routing for Node.js. One install replaces `node:http`, `node:https`, the undici/fetch global dispatcher, and provides WebSocket and explicit HTTP CONNECT helpers for the same policy.
 
 Proxyline exists to make proxy behavior **explicit, observable, and hard to bypass accidentally** — so that "all egress goes through this gateway" is something you encode in code rather than hope for from environment variables.
+
+Proxyline's runtime assurances assume it is installed before application and plugin networking code is loaded. Code that captured networking functions before installation, uses raw sockets, or owns a private/native transport stack is outside the normal Proxyline model.
 
 Website: [proxyline.dev](https://proxyline.dev)
 

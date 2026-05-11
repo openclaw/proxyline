@@ -1,12 +1,12 @@
 ---
 title: Overview
 permalink: /
-description: "Process-global proxy routing for Node.js. One install routes node:http, node:https, undici/fetch, WebSocket, and HTTP CONNECT traffic through a single explicit policy."
+description: "Process-global proxy routing for Node.js. One install routes node:http, node:https, undici/fetch, plus WebSocket and HTTP CONNECT helpers through a single explicit policy."
 ---
 
 # Proxyline Documentation
 
-Process-global proxy routing for Node.js. Proxyline patches the network surfaces a Node process can reach without owning a private transport stack, so a single policy applies to `node:http`, `node:https`, undici/fetch, WebSocket clients, and explicit HTTP CONNECT tunnels.
+Process-global proxy routing for Node.js. Proxyline patches the network surfaces a Node process can reach without owning a private transport stack, so a single policy applies to `node:http`, `node:https`, undici/fetch, WebSocket clients that accept agents, and explicit HTTP CONNECT helpers.
 
 ## Contents
 

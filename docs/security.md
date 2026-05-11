@@ -2,6 +2,12 @@
 
 Proxyline is a Node-process runtime, not an operating-system sandbox. Understanding what it does — and what it cannot do — is essential before relying on it as a policy.
 
+## Assurance model
+
+Proxyline's runtime assurances assume it is installed before application and plugin networking code is loaded. Install it as the first import in the process when proxy routing is part of the security posture.
+
+These assurances apply to the surfaces Proxyline patches or helpers it creates. They do not apply to code that captured networking functions before installation, raw sockets, native transports, or separate bundled transport stacks.
+
 ## What Proxyline enforces
 
 In **managed** mode, Proxyline forces traffic through the configured proxy on the surfaces it covers:
@@ -10,7 +16,7 @@ In **managed** mode, Proxyline forces traffic through the configured proxy on th
 - `https.request` / `https.get` / `https.globalAgent`
 - The undici global dispatcher (i.e. `fetch`)
 - WebSocket clients that accept a Node `agent`, via `proxy.createWebSocketAgent()` or by reusing the patched `http.request` during the upgrade
-- Explicit HTTP CONNECT via `openProxyConnectTunnel`
+- Explicit HTTP CONNECT when callers opt in to `openProxyConnectTunnel`
 
 Caller-supplied `http.Agent` / `https.Agent` instances are replaced per request, and `createConnection` overrides are stripped. TLS-relevant agent options are lifted onto the request so destination TLS still validates correctly.
 

@@ -28,6 +28,10 @@ export function resolveProxyTlsCa(options: ProxylineTlsOptions | undefined): str
   return undefined;
 }
 
+export function formatUrl(value: string | URL): string {
+  return value instanceof URL ? value.href : new URL(value).href;
+}
+
 export function redactProxyUrl(value: string | URL): string {
   const url = value instanceof URL ? new URL(value.href) : new URL(value);
   url.username = "";

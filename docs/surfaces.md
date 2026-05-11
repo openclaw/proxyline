@@ -39,7 +39,7 @@ Some HTTP clients build absolute-form requests themselves (e.g. `path: "https://
 `installGlobalProxy` calls `undici.setGlobalDispatcher` with:
 
 - `undici.ProxyAgent` in managed mode, pointed at `proxyUrl` and trusting `proxyTls` when supplied.
-- `undici.EnvHttpProxyAgent` in ambient mode, configured from the current `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` snapshot, with the same `proxyTls`.
+- Proxyline's ambient dispatcher in ambient mode, resolving each request against the current install-time `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` snapshot, with the same `proxyTls`.
 
 The original dispatcher is captured and restored on `stop()`.
 
@@ -106,5 +106,7 @@ To get a proxy-aware agent without going through the patched globals, use:
 - `proxy.createNodeAgent()` — an `http.Agent` that proxies HTTP and HTTPS requests.
 - `proxy.createUndiciDispatcher()` — an undici `Dispatcher` mirroring the current mode.
 - `proxy.createWebSocketAgent()` — an `http.Agent` suitable for WebSocket upgrades.
+
+Helper-created agents and dispatchers are caller-owned. Destroy or close them when the caller is done.
 
 When the runtime is inactive (ambient mode with no env proxy set), these helpers return plain agents/dispatchers that go direct.

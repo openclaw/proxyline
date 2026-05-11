@@ -452,6 +452,23 @@ test("managed mode overrides a caller-provided direct node:http agent", async ()
   }
 });
 
+test("stopped handles create direct helper agents", async () => {
+  const lab = await startProxyLab();
+  const proxy = installGlobalProxy({ mode: "managed", proxyUrl: lab.proxyUrl });
+  proxy.stop();
+  const helperAgent = proxy.createNodeAgent();
+  try {
+    const deniedDirect = await readHttp(`${lab.targetUrl}/denied`, helperAgent);
+
+    assert.equal(deniedDirect.status, 200);
+    assert.equal(deniedDirect.body, "target denied endpoint reached unexpectedly\n");
+    assert.equal(lab.events.length, 0);
+  } finally {
+    helperAgent.destroy();
+    await lab.close();
+  }
+});
+
 test("managed mode preserves caller-provided HTTPS agent TLS options while forcing proxy routing", async () => {
   const lab = await startProxyLab({ secureTarget: true });
   assert.ok(lab.targetCa);

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
 import {
   installGlobalProxy,
@@ -7,6 +8,42 @@ import {
   redactProxyUrl,
   type ProxylineEvent,
 } from "../src/index.js";
+import { formatConnectAuthority } from "../src/connect.js";
+import { CALLER_AGENT_TLS_OPTION_KEYS } from "../src/node-http.js";
+
+function withProxyEnv<T>(env: Record<string, string | undefined>, run: () => T): T {
+  const keys = [
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "no_proxy",
+  ] as const;
+  const previous: Record<string, string | undefined> = {};
+  for (const key of keys) {
+    previous[key] = process.env[key];
+    delete process.env[key];
+  }
+  for (const [key, value] of Object.entries(env)) {
+    if (value !== undefined) {
+      process.env[key] = value;
+    }
+  }
+  try {
+    return run();
+  } finally {
+    for (const key of keys) {
+      if (previous[key] === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = previous[key];
+      }
+    }
+  }
+}
 
 test("managed mode requires an explicit proxy URL", () => {
   assert.throws(
@@ -64,9 +101,82 @@ test("ambient mode ignores explicit proxyUrl", () => {
   assert.equal(decision.reason, "ambient-proxy-not-configured");
 });
 
+test("ambient mode treats lower-case proxy env as higher precedence", () => {
+  const proxy = withProxyEnv(
+    {
+      HTTP_PROXY: "http://upper.example:8080",
+      http_proxy: "http://lower.example:8080",
+    },
+    () => installProxyline({ mode: "ambient" }),
+  );
+  try {
+    const decision = proxy.explain("http://api.example.com/");
+
+    assert.equal(decision.kind, "proxied");
+    assert.equal(decision.proxyUrl, "http://lower.example:8080/");
+  } finally {
+    proxy.stop();
+  }
+});
+
+test("ambient mode ignores unsupported proxy schemes", () => {
+  const proxy = withProxyEnv(
+    { ALL_PROXY: "socks-not-supported://proxy.example:1080" },
+    () => installProxyline({ mode: "ambient" }),
+  );
+  try {
+    assert.equal(proxy.active, false);
+  } finally {
+    proxy.stop();
+  }
+});
+
+test("ambient mode suffix no-proxy entries also match the root host", () => {
+  for (const noProxy of [".corp.example", "*.corp.example"]) {
+    const proxy = withProxyEnv(
+      { HTTP_PROXY: "http://proxy.example:8080", NO_PROXY: noProxy },
+      () => installProxyline({ mode: "ambient" }),
+    );
+    try {
+      const decision = proxy.explain("http://corp.example/");
+
+      assert.equal(decision.kind, "direct");
+      assert.equal(decision.reason, "no-proxy-match");
+    } finally {
+      proxy.stop();
+    }
+  }
+});
+
 test("redactProxyUrl removes credentials, search, and hash", () => {
   assert.equal(
     redactProxyUrl("https://user:secret@proxy.example:8443/path?q=1#frag"),
     "https://proxy.example:8443/path",
+  );
+});
+
+test("documented TLS preservation keys match runtime list", () => {
+  const surfacesDoc = fs.readFileSync("docs/surfaces.md", "utf8");
+  const match = surfacesDoc.match(
+    /TLS identity preservation[\s\S]*?\n\n(`[^`\n]+`(?:, `[^`\n]+`)*)\./,
+  );
+  assert.ok(match);
+  const documentedKeys = match[1]?.split(", ").map((key) => key.replace(/`/g, ""));
+
+  assert.deepEqual(documentedKeys, [...CALLER_AGENT_TLS_OPTION_KEYS]);
+});
+
+test("CONNECT authority formatting rejects unsafe hosts and brackets IPv6", () => {
+  assert.equal(formatConnectAuthority("::1", 443), "[::1]:443");
+  assert.equal(formatConnectAuthority("[::1]", 443), "[::1]:443");
+  assert.throws(
+    () => formatConnectAuthority("api.example.com\r\nProxy-Authorization: injected", 443),
+    (error: unknown) =>
+      error instanceof ProxylineError && error.code === "INVALID_CONNECT_TARGET",
+  );
+  assert.throws(
+    () => formatConnectAuthority("api.example.com", 0),
+    (error: unknown) =>
+      error instanceof ProxylineError && error.code === "INVALID_CONNECT_TARGET",
   );
 });

@@ -29,14 +29,14 @@ const proxy = installGlobalProxy({
 Ambient mode mirrors the conventional "respect the environment" behavior used by most CLI tooling.
 
 - `proxyUrl` is **ignored** if supplied. Configuration comes from `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and `NO_PROXY` (and their lowercase forms).
-- The runtime only installs patches when at least one of `HTTP_PROXY`, `HTTPS_PROXY`, or `ALL_PROXY` is set. `proxy.active` is `false` otherwise and the handle behaves as a passive observer.
+- The runtime only installs patches when at least one of `HTTP_PROXY`, `HTTPS_PROXY`, or `ALL_PROXY` resolves to a supported `http://` or `https://` proxy endpoint. `proxy.active` is `false` otherwise and the handle behaves as a passive observer.
 - Per-request proxy resolution honors protocol-specific variables, falls back to `ALL_PROXY`, and applies `NO_PROXY` matching (suffix, wildcard, exact, IPv6).
 - Bare endpoints (no scheme) default to `http://` — e.g. `HTTPS_PROXY=proxy.corp:8080` becomes `http://proxy.corp:8080`.
-- The undici global dispatcher becomes `undici.EnvHttpProxyAgent` so `fetch` sees the same routing rules.
+- The undici global dispatcher becomes Proxyline's ambient dispatcher so `fetch` sees the same routing rules.
 - `explain()` returns one of:
   - `kind: "proxied"`, `reason: "ambient-proxy-active"` — a proxy applies.
   - `kind: "direct"`, `reason: "no-proxy-match"` — `NO_PROXY` exempted the host.
-  - `kind: "direct"`, `reason: "ambient-proxy-not-configured"` — no proxy variables are set, or the URL scheme is unsupported.
+  - `kind: "direct"`, `reason: "ambient-proxy-not-configured"` — no supported proxy variables are set, the configured proxy scheme is unsupported, or the URL scheme is unsupported.
 
 Use ambient mode for tooling and CLIs that need best-effort compatibility with whatever the operator has configured.
 
@@ -56,7 +56,7 @@ if (!proxy.active) {
 | Honors `NO_PROXY` | no | yes |
 | Forces traffic through proxy | yes | only when env says so |
 | Replaces caller-supplied agents | yes | yes (when active) |
-| Installs undici dispatcher | `ProxyAgent` | `EnvHttpProxyAgent` |
+| Installs undici dispatcher | `ProxyAgent` | Proxyline ambient dispatcher |
 | `explain()` direct reason | never | `no-proxy-match` or `ambient-proxy-not-configured` |
 | Setup failure mode | throws | inactive but installed |
 

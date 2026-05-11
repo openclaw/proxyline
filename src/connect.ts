@@ -11,6 +11,7 @@ export type OpenProxyConnectTunnelOptions = Readonly<{
 }>;
 
 const MAX_CONNECT_RESPONSE_HEADER_BYTES = 16 * 1024;
+const INVALID_CONNECT_AUTHORITY_PATTERN = /[\u0000-\u0020\u007f]/;
 
 type ProxySocket = net.Socket | tls.TLSSocket;
 
@@ -32,6 +33,26 @@ function resolveProxyAuthorization(proxy: URL): string | undefined {
   const username = decodeURIComponent(proxy.username);
   const password = decodeURIComponent(proxy.password);
   return `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
+}
+
+export function formatConnectAuthority(targetHost: string, targetPort: number): string {
+  if (!Number.isInteger(targetPort) || targetPort < 1 || targetPort > 65_535) {
+    throw new ProxylineError("INVALID_CONNECT_TARGET", `Invalid CONNECT target port: ${targetPort}`);
+  }
+  if (!targetHost || INVALID_CONNECT_AUTHORITY_PATTERN.test(targetHost)) {
+    throw new ProxylineError("INVALID_CONNECT_TARGET", "CONNECT target host is empty or unsafe.");
+  }
+  const unbracketedHost =
+    targetHost.startsWith("[") && targetHost.endsWith("]")
+      ? targetHost.slice(1, -1)
+      : targetHost;
+  if (net.isIP(unbracketedHost) === 6) {
+    return `[${unbracketedHost}]:${targetPort}`;
+  }
+  if (targetHost.includes("[") || targetHost.includes("]")) {
+    throw new ProxylineError("INVALID_CONNECT_TARGET", "CONNECT target host has invalid brackets.");
+  }
+  return `${targetHost}:${targetPort}`;
 }
 
 function connectToProxy(proxy: URL, proxyTls: ProxylineTlsOptions | undefined): ProxySocket {
@@ -77,7 +98,7 @@ export async function openProxyConnectTunnel(
   options: OpenProxyConnectTunnelOptions,
 ): Promise<ProxySocket> {
   const proxy = options.proxyUrl instanceof URL ? new URL(options.proxyUrl.href) : new URL(options.proxyUrl);
-  const target = `${options.targetHost}:${options.targetPort}`;
+  const target = formatConnectAuthority(options.targetHost, options.targetPort);
 
   return await new Promise<ProxySocket>((resolve, reject) => {
     let settled = false;
