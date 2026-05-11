@@ -157,3 +157,11 @@ export function createNodeProxyAgent(
     httpsAgent: new https.Agent(),
   });
 }
+
+export function createDirectNodeAgent(): NodeProxyAgent {
+  return new NodeProxyAgent({
+    getProxyForUrl: () => "",
+    httpAgent: new http.Agent(),
+    httpsAgent: new https.Agent(),
+  });
+}

@@ -8,7 +8,7 @@ Ambient mode reads its configuration from the environment at install time. Manag
 | --- | --- | --- |
 | `HTTP_PROXY` | proxy for `http:` and `ws:` URLs | lower case wins when both are set |
 | `HTTPS_PROXY` | proxy for `https:` and `wss:` URLs | |
-| `ALL_PROXY` | fallback when the protocol-specific variable is unset | |
+| `ALL_PROXY` | fallback when the protocol-specific variable is unset or unsupported | |
 | `NO_PROXY` | comma- or whitespace-separated list of exemptions | matched against the destination URL |
 | `http_proxy` | lowercase alias for `HTTP_PROXY` | takes precedence over uppercase |
 | `https_proxy` | lowercase alias | |

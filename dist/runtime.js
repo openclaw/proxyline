@@ -2,7 +2,7 @@ import http from "node:http";
 import https from "node:https";
 import { Agent as UndiciAgent, Dispatcher, errors as undiciErrors, getGlobalDispatcher, ProxyAgent as UndiciProxyAgent, setGlobalDispatcher, } from "undici";
 import { createAmbientProxyResolver, EMPTY_PROXY_ENV, resolveAmbientProxyForUrl, readProxyEnv, } from "./env.js";
-import { bindNodeHttpMethod, createNodeProxyAgent, } from "./node-http.js";
+import { bindNodeHttpMethod, createDirectNodeAgent, createNodeProxyAgent, } from "./node-http.js";
 import { formatUrl, ProxylineError, redactProxyUrl, resolveProxyTlsCa, } from "./shared.js";
 let activeRuntime;
 function normalizeProxyUrl(value) {
@@ -224,7 +224,7 @@ export function installProxyline(options) {
         ...(redactedProxyUrl ? { proxyUrl: redactedProxyUrl } : {}),
         createNodeAgent: () => {
             if (!hasActiveProxy || stopped) {
-                return new http.Agent();
+                return createDirectNodeAgent();
             }
             return createNodeProxyAgent(resolver, proxyCa);
         },
@@ -235,7 +235,7 @@ export function installProxyline(options) {
                 : { mode: "ambient", env: ambientEnv ?? EMPTY_PROXY_ENV, active: hasActiveProxy }, proxyCa),
         createWebSocketAgent: () => {
             if (!hasActiveProxy || stopped) {
-                return new http.Agent();
+                return createDirectNodeAgent();
             }
             return createNodeProxyAgent(resolver, proxyCa);
         },

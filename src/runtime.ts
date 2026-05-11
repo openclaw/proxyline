@@ -18,6 +18,7 @@ import {
 } from "./env.js";
 import {
   bindNodeHttpMethod,
+  createDirectNodeAgent,
   createNodeProxyAgent,
   type NodeHttpStackSnapshot,
 } from "./node-http.js";
@@ -321,7 +322,7 @@ export function installProxyline(options: ProxylineOptions): ProxylineHandle {
     ...(redactedProxyUrl ? { proxyUrl: redactedProxyUrl } : {}),
     createNodeAgent: () => {
       if (!hasActiveProxy || stopped) {
-        return new http.Agent();
+        return createDirectNodeAgent();
       }
       return createNodeProxyAgent(resolver, proxyCa);
     },
@@ -336,7 +337,7 @@ export function installProxyline(options: ProxylineOptions): ProxylineHandle {
           ),
     createWebSocketAgent: () => {
       if (!hasActiveProxy || stopped) {
-        return new http.Agent();
+        return createDirectNodeAgent();
       }
       return createNodeProxyAgent(resolver, proxyCa);
     },

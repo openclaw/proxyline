@@ -117,3 +117,10 @@ export function createNodeProxyAgent(resolver, proxyCa) {
         httpsAgent: new https.Agent(),
     });
 }
+export function createDirectNodeAgent() {
+    return new NodeProxyAgent({
+        getProxyForUrl: () => "",
+        httpAgent: new http.Agent(),
+        httpsAgent: new https.Agent(),
+    });
+}
