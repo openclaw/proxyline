@@ -37,7 +37,7 @@
     "check": "pnpm typecheck && pnpm test && pnpm build",
     "docs:build": "node scripts/build-docs-site.mjs",
     "package:dry-run": "pnpm pack --dry-run",
-    "prepare": "pnpm build",
+    "prepack": "node scripts/prepack-build.mjs",
     "publish:dry-run": "pnpm publish --dry-run --access public",
     "test": "tsx --test test/index.test.ts test/e2e.test.ts",
     "typecheck": "tsc --noEmit"
