@@ -21,7 +21,6 @@ export const CALLER_AGENT_TLS_OPTION_KEYS = [
     "secureProtocol",
     "sessionIdContext",
 ];
-const PROXY_AGENT_TLS_OPTION_KEYS = CALLER_AGENT_TLS_OPTION_KEYS.filter((key) => key !== "ca");
 function copyNodeHttpOptions(value) {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
         return {};
@@ -110,22 +109,9 @@ export function bindNodeHttpMethod(originalMethod, createAgent) {
         return request;
     });
 }
-export function createNodeProxyAgent(resolver, proxyCa, options) {
-    const tlsOptions = {};
-    if (options !== undefined) {
-        for (const key of PROXY_AGENT_TLS_OPTION_KEYS) {
-            const value = options[key];
-            if (value !== undefined) {
-                tlsOptions[key] = value;
-            }
-        }
-        if (options.servername !== undefined) {
-            tlsOptions.servername = options.servername;
-        }
-    }
+export function createNodeProxyAgent(resolver, proxyCa) {
     return new NodeProxyAgent({
         ...(proxyCa !== undefined ? { ca: proxyCa } : {}),
-        ...tlsOptions,
         getProxyForUrl: resolver.getProxyForUrl,
         httpAgent: new http.Agent(),
         httpsAgent: new https.Agent(),

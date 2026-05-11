@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   installGlobalProxy,
   installProxyline,
+  openProxyConnectTunnel,
   ProxylineError,
   redactProxyUrl,
   type ProxylineEvent,
@@ -212,4 +213,16 @@ test("CONNECT authority formatting rejects unsafe hosts and brackets IPv6", () =
         error instanceof ProxylineError && error.code === "INVALID_CONNECT_TARGET",
     );
   }
+});
+
+test("CONNECT helper rejects unsupported proxy schemes with the documented code", async () => {
+  await assert.rejects(
+    openProxyConnectTunnel({
+      proxyUrl: "socks://proxy.example:1080",
+      targetHost: "api.example.com",
+      targetPort: 443,
+    }),
+    (error: unknown) =>
+      error instanceof ProxylineError && error.code === "UNSUPPORTED_PROXY_PROTOCOL",
+  );
 });

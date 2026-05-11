@@ -63,6 +63,11 @@ function connectToProxy(proxy, proxyTls) {
     }
     throw new ProxylineError("UNSUPPORTED_PROXY_PROTOCOL", `CONNECT tunnels support http:// and https:// proxy endpoints: ${proxy.protocol}`);
 }
+function assertSupportedConnectProxyProtocol(proxy) {
+    if (proxy.protocol !== "http:" && proxy.protocol !== "https:") {
+        throw new ProxylineError("UNSUPPORTED_PROXY_PROTOCOL", `CONNECT tunnels support http:// and https:// proxy endpoints: ${proxy.protocol}`);
+    }
+}
 function writeConnectRequest(socket, proxy, target) {
     const headers = [`CONNECT ${target} HTTP/1.1`, `Host: ${target}`, "Proxy-Connection: Keep-Alive"];
     const authorization = resolveProxyAuthorization(proxy);
@@ -77,6 +82,7 @@ function failConnect(proxy, error) {
 }
 export async function openProxyConnectTunnel(options) {
     const proxy = options.proxyUrl instanceof URL ? new URL(options.proxyUrl.href) : new URL(options.proxyUrl);
+    assertSupportedConnectProxyProtocol(proxy);
     const target = formatConnectAuthority(options.targetHost, options.targetPort);
     return await new Promise((resolve, reject) => {
         let settled = false;

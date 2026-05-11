@@ -647,6 +647,24 @@ test("managed mode trusts an HTTPS proxy endpoint with scoped CA", async () => {
   }
 });
 
+test("managed mode keeps destination TLS options from weakening HTTPS proxy TLS", async () => {
+  const lab = await startProxyLab({ secureProxy: true, secureTarget: true });
+  const proxy = installGlobalProxy({ mode: "managed", proxyUrl: lab.proxyUrl });
+  const callerAgent = new https.Agent({ rejectUnauthorized: false });
+  try {
+    await assert.rejects(
+      readHttps(`${lab.targetUrl}/allowed`, { agent: callerAgent }),
+      /self-signed certificate/,
+    );
+
+    assert.equal(lab.events.length, 0);
+  } finally {
+    callerAgent.destroy();
+    proxy.stop();
+    await lab.close();
+  }
+});
+
 test("websocket helper routes ws clients through the lab proxy", async () => {
   const lab = await startProxyLab();
   const wsServer = await createWebSocketServer();

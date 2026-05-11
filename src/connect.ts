@@ -84,6 +84,15 @@ function connectToProxy(proxy: URL, proxyTls: ProxylineTlsOptions | undefined): 
   );
 }
 
+function assertSupportedConnectProxyProtocol(proxy: URL): void {
+  if (proxy.protocol !== "http:" && proxy.protocol !== "https:") {
+    throw new ProxylineError(
+      "UNSUPPORTED_PROXY_PROTOCOL",
+      `CONNECT tunnels support http:// and https:// proxy endpoints: ${proxy.protocol}`,
+    );
+  }
+}
+
 function writeConnectRequest(socket: net.Socket, proxy: URL, target: string): void {
   const headers = [`CONNECT ${target} HTTP/1.1`, `Host: ${target}`, "Proxy-Connection: Keep-Alive"];
   const authorization = resolveProxyAuthorization(proxy);
@@ -102,6 +111,7 @@ export async function openProxyConnectTunnel(
   options: OpenProxyConnectTunnelOptions,
 ): Promise<ProxySocket> {
   const proxy = options.proxyUrl instanceof URL ? new URL(options.proxyUrl.href) : new URL(options.proxyUrl);
+  assertSupportedConnectProxyProtocol(proxy);
   const target = formatConnectAuthority(options.targetHost, options.targetPort);
 
   return await new Promise<ProxySocket>((resolve, reject) => {

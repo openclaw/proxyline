@@ -17,6 +17,6 @@ export type NodeHttpStackSnapshot = {
     httpsGlobalAgent: typeof https.globalAgent;
 };
 export declare function bindNodeHttpMethod<TMethod extends NodeHttpMethod>(originalMethod: TMethod, createAgent: NodeAgentFactory): TMethod;
-export declare function createNodeProxyAgent(resolver: ProxyResolver, proxyCa: string | undefined, options?: NodeHttpRequestOptions): NodeProxyAgent;
+export declare function createNodeProxyAgent(resolver: ProxyResolver, proxyCa: string | undefined): NodeProxyAgent;
 export {};
 //# sourceMappingURL=node-http.d.ts.map

@@ -168,10 +168,10 @@ function installRuntime(resolver, dispatcherOptions, proxyCa) {
     try {
         http.globalAgent = nodeAgent;
         https.globalAgent = nodeAgent;
-        http.request = bindNodeHttpMethod(snapshot.httpRequest, (options) => createNodeProxyAgent(resolver, proxyCa, options));
-        http.get = bindNodeHttpMethod(snapshot.httpGet, (options) => createNodeProxyAgent(resolver, proxyCa, options));
-        https.request = bindNodeHttpMethod(snapshot.httpsRequest, (options) => createNodeProxyAgent(resolver, proxyCa, options));
-        https.get = bindNodeHttpMethod(snapshot.httpsGet, (options) => createNodeProxyAgent(resolver, proxyCa, options));
+        http.request = bindNodeHttpMethod(snapshot.httpRequest, () => createNodeProxyAgent(resolver, proxyCa));
+        http.get = bindNodeHttpMethod(snapshot.httpGet, () => createNodeProxyAgent(resolver, proxyCa));
+        https.request = bindNodeHttpMethod(snapshot.httpsRequest, () => createNodeProxyAgent(resolver, proxyCa));
+        https.get = bindNodeHttpMethod(snapshot.httpsGet, () => createNodeProxyAgent(resolver, proxyCa));
         setGlobalDispatcher(installedDispatcher);
     }
     catch (error) {

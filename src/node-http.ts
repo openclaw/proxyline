@@ -35,8 +35,6 @@ export const CALLER_AGENT_TLS_OPTION_KEYS = [
   "sessionIdContext",
 ] as const;
 
-const PROXY_AGENT_TLS_OPTION_KEYS = CALLER_AGENT_TLS_OPTION_KEYS.filter((key) => key !== "ca");
-
 export type NodeHttpStackSnapshot = {
   httpRequest: typeof http.request;
   httpGet: typeof http.get;
@@ -151,24 +149,9 @@ export function bindNodeHttpMethod<TMethod extends NodeHttpMethod>(
 export function createNodeProxyAgent(
   resolver: ProxyResolver,
   proxyCa: string | undefined,
-  options?: NodeHttpRequestOptions,
 ): NodeProxyAgent {
-  const tlsOptions: Record<string, unknown> = {};
-  if (options !== undefined) {
-    for (const key of PROXY_AGENT_TLS_OPTION_KEYS) {
-      const value = options[key];
-      if (value !== undefined) {
-        tlsOptions[key] = value;
-      }
-    }
-    if (options.servername !== undefined) {
-      tlsOptions.servername = options.servername;
-    }
-  }
-
   return new NodeProxyAgent({
     ...(proxyCa !== undefined ? { ca: proxyCa } : {}),
-    ...tlsOptions,
     getProxyForUrl: resolver.getProxyForUrl,
     httpAgent: new http.Agent(),
     httpsAgent: new https.Agent(),
