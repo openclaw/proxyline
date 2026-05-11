@@ -131,6 +131,26 @@ test("ambient mode ignores unsupported proxy schemes", () => {
   }
 });
 
+test("ambient mode falls back to ALL_PROXY when protocol proxy scheme is unsupported", () => {
+  const proxy = withProxyEnv(
+    {
+      HTTP_PROXY: "socks-not-supported://specific.example:1080",
+      ALL_PROXY: "http://fallback.example:8080",
+    },
+    () => installProxyline({ mode: "ambient" }),
+  );
+  try {
+    const decision = proxy.explain("http://api.example.com/");
+
+    assert.equal(proxy.active, true);
+    assert.equal(proxy.proxyUrl, "http://fallback.example:8080/");
+    assert.equal(decision.kind, "proxied");
+    assert.equal(decision.proxyUrl, "http://fallback.example:8080/");
+  } finally {
+    proxy.stop();
+  }
+});
+
 test("ambient mode suffix no-proxy entries also match the root host", () => {
   for (const noProxy of [".corp.example", "*.corp.example"]) {
     const proxy = withProxyEnv(

@@ -374,6 +374,31 @@ test("ambient mode uses ALL_PROXY and redacts credentials in explain output", as
   }
 });
 
+test("ambient mode falls back to ALL_PROXY when HTTP_PROXY scheme is unsupported", async () => {
+  const lab = await startProxyLab();
+  const proxy = withProxyEnv(
+    { HTTP_PROXY: "socks-not-supported://specific.example:1080", ALL_PROXY: lab.proxyUrl },
+    () => installGlobalProxy({ mode: "ambient" }),
+  );
+  try {
+    const nodeResponse = await readHttp(`${lab.targetUrl}/denied`);
+    const fetchResponse = await fetch(`${lab.targetUrl}/denied`);
+
+    assert.equal(nodeResponse.status, 403);
+    assert.equal(fetchResponse.status, 403);
+    assert.ok(
+      lab.events.filter(
+        (event) =>
+          event.type === "deny" ||
+          (event.type === "deny_connect" && event.path === "/denied"),
+      ).length >= 2,
+    );
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
 test("ambient mode forwards standard proxy authorization from env proxy URL credentials", async () => {
   const requiredProxyAuthorization = `Basic ${Buffer.from("user:secret").toString("base64")}`;
   const lab = await startProxyLab({ requiredProxyAuthorization });

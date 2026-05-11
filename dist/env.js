@@ -138,6 +138,9 @@ function proxyEnvKeyForProtocol(protocol) {
     }
     return undefined;
 }
+function resolveAmbientProxyEnvValue(env, key) {
+    return normalizeAmbientProxyUrl(readProxyEnvValue(env, key));
+}
 export function resolveAmbientProxyForUrl(url, env) {
     let parsedUrl;
     try {
@@ -160,13 +163,13 @@ export function resolveAmbientProxyForUrl(url, env) {
     if (protocolProxyKey === undefined) {
         return undefined;
     }
-    const proxy = readProxyEnvValue(env, protocolProxyKey) ?? readProxyEnvValue(env, "all_proxy");
-    return normalizeAmbientProxyUrl(proxy);
+    return (resolveAmbientProxyEnvValue(env, protocolProxyKey) ??
+        resolveAmbientProxyEnvValue(env, "all_proxy"));
 }
 export function createAmbientProxyResolver(env) {
-    const configuredProxy = normalizeAmbientProxyUrl(readProxyEnvValue(env, "http_proxy")) ??
-        normalizeAmbientProxyUrl(readProxyEnvValue(env, "https_proxy")) ??
-        normalizeAmbientProxyUrl(readProxyEnvValue(env, "all_proxy"));
+    const configuredProxy = resolveAmbientProxyEnvValue(env, "http_proxy") ??
+        resolveAmbientProxyEnvValue(env, "https_proxy") ??
+        resolveAmbientProxyEnvValue(env, "all_proxy");
     return {
         active: configuredProxy !== undefined,
         describeProxy: () => configuredProxy
