@@ -171,8 +171,8 @@ function upperProxyEnvKey(key) {
 function readProxyEnvValue(env, key) {
     return normalizeEnvValue(env[key]) ?? normalizeEnvValue(env[upperProxyEnvKey(key)]);
 }
-function proxyUrlWithDefaultScheme(proxyUrl, protocol) {
-    return proxyUrl.includes("://") ? proxyUrl : `${protocol}://${proxyUrl}`;
+function proxyUrlWithDefaultScheme(proxyUrl) {
+    return proxyUrl.includes("://") ? proxyUrl : `http://${proxyUrl}`;
 }
 function defaultPort(protocol) {
     if (protocol === "http:" || protocol === "ws:") {
@@ -191,15 +191,14 @@ function matchesNoProxy(url, env) {
     if (rawNoProxy === "*") {
         return true;
     }
-    const hostname = url.host.replace(/:\d*$/, "").toLowerCase();
+    const hostname = normalizeNoProxyHost(url.hostname);
     const port = Number.parseInt(url.port, 10) || defaultPort(url.protocol);
     for (const rawEntry of rawNoProxy.split(/[,\s]/)) {
         if (!rawEntry) {
             continue;
         }
-        const parsedEntry = rawEntry.match(/^(.+):(\d+)$/);
-        let entryHost = parsedEntry?.[1] ?? rawEntry;
-        const entryPort = parsedEntry?.[2] ? Number.parseInt(parsedEntry[2], 10) : 0;
+        const { host: parsedHost, port: entryPort } = parseNoProxyEntry(rawEntry);
+        let entryHost = normalizeNoProxyHost(parsedHost);
         if (entryPort && entryPort !== port) {
             continue;
         }
@@ -217,6 +216,50 @@ function matchesNoProxy(url, env) {
         }
     }
     return false;
+}
+function normalizeNoProxyHost(hostname) {
+    const normalized = hostname.trim().toLowerCase().replace(/\.+$/, "");
+    return normalized.startsWith("[") && normalized.endsWith("]")
+        ? normalized.slice(1, -1)
+        : normalized;
+}
+function parseNoProxyEntry(entry) {
+    const bracketedIpv6 = entry.match(/^\[([^\]]+)\](?::(\d+))?$/);
+    if (bracketedIpv6) {
+        return {
+            host: bracketedIpv6[1] ?? "",
+            port: bracketedIpv6[2] ? Number.parseInt(bracketedIpv6[2], 10) : 0,
+        };
+    }
+    const lastColon = entry.lastIndexOf(":");
+    const hasSingleColon = lastColon !== -1 && entry.indexOf(":") === lastColon;
+    if (hasSingleColon) {
+        const possiblePort = entry.slice(lastColon + 1);
+        if (/^\d+$/.test(possiblePort)) {
+            return {
+                host: entry.slice(0, lastColon),
+                port: Number.parseInt(possiblePort, 10),
+            };
+        }
+    }
+    return { host: entry, port: 0 };
+}
+function formatNoProxyEntryForUndici(entry) {
+    const { host, port } = parseNoProxyEntry(entry);
+    const normalizedHost = normalizeNoProxyHost(host);
+    const formattedHost = normalizedHost.includes(":") ? `[${normalizedHost}]` : host;
+    return port ? `${formattedHost}:${port}` : formattedHost;
+}
+function normalizeNoProxyForUndici(noProxy) {
+    if (noProxy === undefined) {
+        return undefined;
+    }
+    const entries = noProxy
+        .split(/[,\s]/)
+        .map((entry) => entry.trim())
+        .filter(Boolean)
+        .map(formatNoProxyEntryForUndici);
+    return entries.length > 0 ? entries.join(",") : undefined;
 }
 function proxyEnvKeyForProtocol(protocol) {
     if (protocol === "http:" || protocol === "ws:") {
@@ -250,7 +293,7 @@ function resolveAmbientProxyForUrl(url, env) {
         return undefined;
     }
     const proxy = readProxyEnvValue(env, protocolProxyKey) ?? readProxyEnvValue(env, "all_proxy");
-    return proxy ? proxyUrlWithDefaultScheme(proxy, protocol.slice(0, -1)) : undefined;
+    return proxy ? proxyUrlWithDefaultScheme(proxy) : undefined;
 }
 function createManagedProxyResolver(proxyUrl) {
     const redactedProxyUrl = redactProxyUrl(proxyUrl);
@@ -282,7 +325,7 @@ function createAmbientProxyResolver(env) {
     return {
         active: configuredProxy !== undefined,
         describeProxy: () => configuredProxy
-            ? redactProxyUrl(proxyUrlWithDefaultScheme(configuredProxy, "http"))
+            ? redactProxyUrl(proxyUrlWithDefaultScheme(configuredProxy))
             : undefined,
         explain: (url, surface) => {
             const formattedUrl = formatUrl(url);
@@ -341,13 +384,13 @@ function createUndiciProxyDispatcher(options, proxyCa) {
         const rawHttpProxy = readProxyEnvValue(options.env, "http_proxy") ?? readProxyEnvValue(options.env, "all_proxy");
         const rawHttpsProxy = readProxyEnvValue(options.env, "https_proxy") ??
             readProxyEnvValue(options.env, "all_proxy");
-        const noProxy = readProxyEnvValue(options.env, "no_proxy");
+        const noProxy = normalizeNoProxyForUndici(readProxyEnvValue(options.env, "no_proxy"));
         return new EnvHttpProxyAgent({
             ...(rawHttpProxy !== undefined
-                ? { httpProxy: proxyUrlWithDefaultScheme(rawHttpProxy, "http") }
+                ? { httpProxy: proxyUrlWithDefaultScheme(rawHttpProxy) }
                 : {}),
             ...(rawHttpsProxy !== undefined
-                ? { httpsProxy: proxyUrlWithDefaultScheme(rawHttpsProxy, "https") }
+                ? { httpsProxy: proxyUrlWithDefaultScheme(rawHttpsProxy) }
                 : {}),
             ...(noProxy !== undefined ? { noProxy } : {}),
             ...(proxyCa !== undefined ? { proxyTls: { ca: proxyCa } } : {}),
@@ -409,7 +452,7 @@ function stopRuntime(runtime) {
     activeRuntime = undefined;
 }
 export function installProxyline(options) {
-    const proxyUrl = normalizeProxyUrl(options.proxyUrl);
+    const proxyUrl = options.mode === "managed" ? normalizeProxyUrl(options.proxyUrl) : undefined;
     if (options.mode === "managed" && proxyUrl === undefined) {
         throw new ProxylineError("MANAGED_PROXY_URL_REQUIRED", "Proxyline managed mode requires an explicit proxyUrl.");
     }

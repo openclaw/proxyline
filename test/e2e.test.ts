@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import http from "node:http";
 import https from "node:https";
+import { type AddressInfo } from "node:net";
 import { URL } from "node:url";
 import test from "node:test";
 import { fetch } from "undici";
@@ -172,6 +174,30 @@ test("ambient mode routes node:https through HTTPS_PROXY", async () => {
   }
 });
 
+test("ambient mode defaults bare HTTPS_PROXY endpoints to HTTP proxy URLs", async () => {
+  const lab = await startProxyLab({ secureTarget: true });
+  assert.ok(lab.targetCa);
+  const bareProxyEndpoint = new URL(lab.proxyUrl).host;
+  const proxy = withProxyEnv({ HTTPS_PROXY: bareProxyEndpoint }, () =>
+    installGlobalProxy({ mode: "ambient" }),
+  );
+  try {
+    const allowed = await readHttps(`${lab.targetUrl}/allowed`, {
+      ca: lab.targetCa,
+    });
+    const decision = proxy.explain(`${lab.targetUrl}/allowed`, { surface: "node-https" });
+
+    assert.equal(allowed.status, 200);
+    assert.equal(allowed.body, "allowed via target\n");
+    assert.equal(decision.kind, "proxied");
+    assert.equal(decision.proxyUrl, lab.proxyUrl + "/");
+    assert.ok(lab.events.some((event) => event.type === "connect"));
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
 test("ambient mode validates HTTPS destination TLS against the target host behind a localhost proxy", async () => {
   const lab = await startProxyLab({
     proxyHost: "127.0.0.1",
@@ -327,6 +353,55 @@ test("ambient mode lets NO_PROXY matches go direct with a diagnostic reason", as
   } finally {
     proxy.stop();
     await lab.close();
+  }
+});
+
+test("ambient mode lets bare IPv6 NO_PROXY entries go direct", () => {
+  const proxy = withProxyEnv({ HTTP_PROXY: "http://127.0.0.1:9", NO_PROXY: "::1" }, () =>
+    installGlobalProxy({ mode: "ambient" }),
+  );
+  try {
+    const decision = proxy.explain("http://[::1]:8080/allowed", { surface: "node-http" });
+
+    assert.equal(decision.kind, "direct");
+    assert.equal(decision.reason, "no-proxy-match");
+  } finally {
+    proxy.stop();
+  }
+});
+
+test("ambient mode lets bare IPv6 NO_PROXY entries go direct for undici fetch", async (t) => {
+  const server = http.createServer((_req, res) => {
+    res.end("ipv6 direct\n");
+  });
+  try {
+    server.listen(0, "::1");
+    await once(server, "listening");
+  } catch (error) {
+    server.close();
+    t.skip(`IPv6 loopback unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
+  const address = server.address() as AddressInfo;
+  const proxy = withProxyEnv({ HTTP_PROXY: "http://127.0.0.1:9", NO_PROXY: "::1" }, () =>
+    installGlobalProxy({ mode: "ambient" }),
+  );
+  try {
+    const response = await fetch(`http://[::1]:${address.port}/`);
+
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), "ipv6 direct\n");
+  } finally {
+    proxy.stop();
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
   }
 });
 

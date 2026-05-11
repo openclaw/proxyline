@@ -51,6 +51,19 @@ test("ambient mode can be inactive and explain direct routing", () => {
   assert.equal(decision.reason, "ambient-proxy-not-configured");
 });
 
+test("ambient mode ignores explicit proxyUrl", () => {
+  const proxy = installProxyline({
+    mode: "ambient",
+    proxyUrl: "https://proxy.example:8443",
+  });
+
+  const decision = proxy.explain("https://api.example.com/");
+
+  assert.equal(proxy.active, false);
+  assert.equal(decision.kind, "direct");
+  assert.equal(decision.reason, "ambient-proxy-not-configured");
+});
+
 test("redactProxyUrl removes credentials, search, and hash", () => {
   assert.equal(
     redactProxyUrl("https://user:secret@proxy.example:8443/path?q=1#frag"),
