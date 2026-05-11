@@ -579,6 +579,51 @@ test("stopped handles create direct helper agents", async () => {
   }
 });
 
+test("stopped handles create direct undici helper dispatchers", async () => {
+  const lab = await startProxyLab();
+  const proxy = installGlobalProxy({ mode: "managed", proxyUrl: lab.proxyUrl });
+  proxy.stop();
+  const dispatcher = proxy.createUndiciDispatcher();
+  try {
+    const deniedDirect = await fetch(`${lab.targetUrl}/denied`, { dispatcher });
+
+    assert.equal(deniedDirect.status, 200);
+    assert.equal(await deniedDirect.text(), "target denied endpoint reached unexpectedly\n");
+    assert.equal(lab.events.length, 0);
+  } finally {
+    await dispatcher.close();
+    await lab.close();
+  }
+});
+
+test("stopped handles create direct websocket helper agents", async () => {
+  const lab = await startProxyLab();
+  const wsServer = await createWebSocketServer();
+  const proxy = installGlobalProxy({ mode: "managed", proxyUrl: lab.proxyUrl });
+  proxy.stop();
+  const helperAgent = proxy.createWebSocketAgent();
+  try {
+    const ws = new WebSocket(wsServer.url, { agent: helperAgent });
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", () => {
+        ws.send("ping");
+      });
+      ws.once("message", (data) => {
+        assert.equal(data.toString(), "echo:ping");
+        resolve();
+      });
+      ws.once("error", reject);
+    });
+    ws.close();
+
+    assert.equal(lab.events.length, 0);
+  } finally {
+    helperAgent.destroy();
+    await wsServer.close();
+    await lab.close();
+  }
+});
+
 test("managed mode preserves caller-provided HTTPS agent TLS options while forcing proxy routing", async () => {
   const lab = await startProxyLab({ secureTarget: true });
   assert.ok(lab.targetCa);

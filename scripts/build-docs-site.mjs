@@ -22,7 +22,7 @@ const siteBase = cname ? `https://${cname}` : "";
 const productName = "proxyline";
 const productTagline = "Process-global proxy routing for Node.js";
 const productDescription =
-  "One install routes node:http, node:https, undici/fetch, WebSocket, and HTTP CONNECT traffic through a single explicit policy. Managed mode fails closed; ambient mode honors HTTP_PROXY / NO_PROXY for tooling compatibility.";
+  "One install routes node:http, node:https, and undici/fetch through a single explicit policy, with helper agents for WebSocket and HTTP CONNECT traffic. Managed mode fails closed; ambient mode honors HTTP_PROXY / NO_PROXY for tooling compatibility.";
 const productSubtitle = "Explicit egress policy";
 const installCmd = "pnpm add @openclaw/proxyline";
 
