@@ -35,7 +35,7 @@
     "package:dry-run": "pnpm pack --dry-run",
     "prepare": "pnpm build",
     "publish:dry-run": "pnpm publish --dry-run --access public",
-    "test": "tsx --test test/*.test.ts",
+    "test": "tsx --test test/index.test.ts test/e2e.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
