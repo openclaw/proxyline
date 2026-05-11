@@ -9,6 +9,7 @@ export type OpenProxyConnectTunnelOptions = Readonly<{
     timeoutMs?: number;
 }>;
 type ProxySocket = net.Socket | tls.TLSSocket;
+export declare function formatConnectAuthority(targetHost: string, targetPort: number): string;
 export declare function openProxyConnectTunnel(options: OpenProxyConnectTunnelOptions): Promise<ProxySocket>;
 export {};
 //# sourceMappingURL=connect.d.ts.map

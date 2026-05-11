@@ -266,6 +266,91 @@ test("ambient mode routes undici fetch and helper-created agents through the sam
   }
 });
 
+test("ambient mode does not reuse a destroyed helper undici dispatcher", async () => {
+  const lab = await startProxyLab();
+  const proxy = withProxyEnv({ HTTP_PROXY: lab.proxyUrl }, () =>
+    installGlobalProxy({ mode: "ambient" }),
+  );
+  const dispatcher = proxy.createUndiciDispatcher();
+  try {
+    await dispatcher.destroy();
+
+    await assert.rejects(fetch(`${lab.targetUrl}/denied`, { dispatcher }));
+    assert.equal(lab.events.length, 0);
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
+test("ambient mode routes undici HTTPS fetch through HTTPS_PROXY", async () => {
+  const lab = await startProxyLab();
+  const proxy = withProxyEnv({ HTTPS_PROXY: lab.proxyUrl }, () =>
+    installGlobalProxy({ mode: "ambient" }),
+  );
+  try {
+    await assert.rejects(fetch("https://127.0.0.1:65000/denied"));
+
+    assert.ok(
+      lab.events.some(
+        (event) => event.type === "deny_connect" && event.authority === "127.0.0.1:65000",
+      ),
+    );
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
+test("ambient mode routes undici HTTPS fetch through ALL_PROXY fallback", async () => {
+  const lab = await startProxyLab();
+  const proxy = withProxyEnv({ ALL_PROXY: lab.proxyUrl }, () =>
+    installGlobalProxy({ mode: "ambient" }),
+  );
+  try {
+    await assert.rejects(fetch("https://127.0.0.1:65000/denied"));
+
+    assert.ok(
+      lab.events.some(
+        (event) => event.type === "deny_connect" && event.authority === "127.0.0.1:65000",
+      ),
+    );
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
+test("ambient mode lets undici HTTPS NO_PROXY matches go direct", async () => {
+  const lab = await startProxyLab();
+  const proxy = withProxyEnv({ HTTPS_PROXY: lab.proxyUrl, NO_PROXY: "127.0.0.1" }, () =>
+    installGlobalProxy({ mode: "ambient" }),
+  );
+  try {
+    await assert.rejects(fetch("https://127.0.0.1:65000/denied"));
+
+    assert.equal(lab.events.length, 0);
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
+test("ambient mode does not use HTTP_PROXY for undici HTTPS fetch", async () => {
+  const lab = await startProxyLab();
+  const proxy = withProxyEnv({ HTTP_PROXY: lab.proxyUrl }, () =>
+    installGlobalProxy({ mode: "ambient" }),
+  );
+  try {
+    await assert.rejects(fetch("https://127.0.0.1:65000/denied"));
+
+    assert.equal(lab.events.length, 0);
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
 test("ambient mode uses ALL_PROXY and redacts credentials in explain output", async () => {
   const lab = await startProxyLab();
   const proxyUrl = new URL(lab.proxyUrl);

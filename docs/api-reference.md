@@ -21,7 +21,7 @@ In managed mode (and active ambient mode), `installProxyline`:
 - Calls `undici.setGlobalDispatcher` with a `ProxyAgent` (managed) or Proxyline's ambient dispatcher (ambient).
 - Emits `runtime.installed`.
 
-In inactive ambient mode (no proxy env variables), no patches are installed; the handle returns a passive observer with `active: false`.
+In inactive ambient mode (no supported proxy env variables), no patches are installed; the handle returns a passive observer with `active: false`.
 
 ### `openProxyConnectTunnel(options): Promise<net.Socket | tls.TLSSocket>`
 

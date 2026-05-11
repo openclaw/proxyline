@@ -156,7 +156,7 @@ test("redactProxyUrl removes credentials, search, and hash", () => {
 });
 
 test("documented TLS preservation keys match runtime list", () => {
-  const surfacesDoc = fs.readFileSync("docs/surfaces.md", "utf8");
+  const surfacesDoc = fs.readFileSync("docs/surfaces.md", "utf8").replace(/\r\n/g, "\n");
   const match = surfacesDoc.match(
     /TLS identity preservation[\s\S]*?\n\n(`[^`\n]+`(?:, `[^`\n]+`)*)\./,
   );
@@ -179,4 +179,17 @@ test("CONNECT authority formatting rejects unsafe hosts and brackets IPv6", () =
     (error: unknown) =>
       error instanceof ProxylineError && error.code === "INVALID_CONNECT_TARGET",
   );
+  for (const unsafeHost of [
+    "api.example.com:443",
+    "api.example.com/path",
+    "user@api.example.com",
+    "api.example.com?debug=true",
+    "api.example.com#fragment",
+  ]) {
+    assert.throws(
+      () => formatConnectAuthority(unsafeHost, 443),
+      (error: unknown) =>
+        error instanceof ProxylineError && error.code === "INVALID_CONNECT_TARGET",
+    );
+  }
 });

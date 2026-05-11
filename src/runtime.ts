@@ -4,6 +4,7 @@ import { ProxyAgent as NodeProxyAgent } from "proxy-agent";
 import {
   Agent as UndiciAgent,
   Dispatcher,
+  errors as undiciErrors,
   getGlobalDispatcher,
   ProxyAgent as UndiciProxyAgent,
   setGlobalDispatcher,
@@ -107,6 +108,7 @@ class AmbientUndiciDispatcher extends Dispatcher {
   readonly #env: ProxyEnvSnapshot;
   readonly #proxyCa: string | undefined;
   readonly #proxyDispatchers = new Map<string, UndiciProxyAgent>();
+  #closedError: Error | undefined;
 
   public constructor(env: ProxyEnvSnapshot, proxyCa: string | undefined) {
     super();
@@ -118,6 +120,13 @@ class AmbientUndiciDispatcher extends Dispatcher {
     options: Dispatcher.DispatchOptions,
     handler: Dispatcher.DispatchHandler,
   ): boolean {
+    if (this.#closedError !== undefined) {
+      if (handler.onError === undefined) {
+        throw this.#closedError;
+      }
+      handler.onError(this.#closedError);
+      return false;
+    }
     const url = resolveUndiciDispatchUrl(options);
     const proxyUrl = url === undefined ? undefined : resolveAmbientProxyForUrl(url, this.#env);
     const dispatcher =
@@ -166,16 +175,22 @@ class AmbientUndiciDispatcher extends Dispatcher {
   }
 
   async #closeAll(): Promise<void> {
+    this.#closedError ??= new undiciErrors.ClientClosedError();
+    const proxyDispatchers = [...this.#proxyDispatchers.values()];
+    this.#proxyDispatchers.clear();
     await Promise.all([
       this.#directDispatcher.close(),
-      ...[...this.#proxyDispatchers.values()].map((dispatcher) => dispatcher.close()),
+      ...proxyDispatchers.map((dispatcher) => dispatcher.close()),
     ]);
   }
 
   async #destroyAll(error: Error | null): Promise<void> {
+    this.#closedError ??= error ?? new undiciErrors.ClientDestroyedError();
+    const proxyDispatchers = [...this.#proxyDispatchers.values()];
+    this.#proxyDispatchers.clear();
     await Promise.all([
       this.#directDispatcher.destroy(error),
-      ...[...this.#proxyDispatchers.values()].map((dispatcher) => dispatcher.destroy(error)),
+      ...proxyDispatchers.map((dispatcher) => dispatcher.destroy(error)),
     ]);
   }
 }

@@ -20,7 +20,7 @@ In **managed** mode, Proxyline forces traffic through the configured proxy on th
 
 Caller-supplied `http.Agent` / `https.Agent` instances are replaced per request, and `createConnection` overrides are stripped. TLS-relevant agent options are lifted onto the request so destination TLS still validates correctly.
 
-In **ambient** mode the same surfaces are covered when at least one of `HTTP_PROXY`, `HTTPS_PROXY`, or `ALL_PROXY` is set, and `NO_PROXY` is honored.
+In **ambient** mode the same surfaces are covered when at least one supported `http://` or `https://` proxy endpoint is set through `HTTP_PROXY`, `HTTPS_PROXY`, or `ALL_PROXY`; unsupported proxy schemes are ignored, and `NO_PROXY` is honored.
 
 ## What Proxyline cannot enforce
 

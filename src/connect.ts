@@ -12,6 +12,7 @@ export type OpenProxyConnectTunnelOptions = Readonly<{
 
 const MAX_CONNECT_RESPONSE_HEADER_BYTES = 16 * 1024;
 const INVALID_CONNECT_AUTHORITY_PATTERN = /[\u0000-\u0020\u007f]/;
+const INVALID_CONNECT_HOST_DELIMITER_PATTERN = /[/:?#@\\]/;
 
 type ProxySocket = net.Socket | tls.TLSSocket;
 
@@ -51,6 +52,9 @@ export function formatConnectAuthority(targetHost: string, targetPort: number): 
   }
   if (targetHost.includes("[") || targetHost.includes("]")) {
     throw new ProxylineError("INVALID_CONNECT_TARGET", "CONNECT target host has invalid brackets.");
+  }
+  if (targetHost.includes(":") || INVALID_CONNECT_HOST_DELIMITER_PATTERN.test(targetHost)) {
+    throw new ProxylineError("INVALID_CONNECT_TARGET", "CONNECT target host is not a host name.");
   }
   return `${targetHost}:${targetPort}`;
 }
