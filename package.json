@@ -16,7 +16,7 @@
   "bugs": {
     "url": "https://github.com/openclaw/proxyline/issues"
   },
-  "homepage": "https://github.com/openclaw/proxyline#readme",
+  "homepage": "https://proxyline.dev",
   "packageManager": "pnpm@10.33.2",
   "exports": {
     ".": {
@@ -25,13 +25,17 @@
     }
   },
   "files": [
-    "dist",
+    "dist/*.js",
+    "dist/*.d.ts",
+    "dist/*.d.ts.map",
+    "CHANGELOG.md",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "check": "pnpm typecheck && pnpm test && pnpm build",
+    "docs:build": "node scripts/build-docs-site.mjs",
     "package:dry-run": "pnpm pack --dry-run",
     "prepare": "pnpm build",
     "publish:dry-run": "pnpm publish --dry-run --access public",

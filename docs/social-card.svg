@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630" role="img" aria-label="proxyline — Process-global proxy routing for Node.js">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#06101f"/>
+      <stop offset="100%" stop-color="#0f1a2e"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.18" cy="0.55" r="0.62">
+      <stop offset="0%" stop-color="#22d3ee" stop-opacity="0.22"/>
+      <stop offset="55%" stop-color="#22d3ee" stop-opacity="0.05"/>
+      <stop offset="100%" stop-color="#22d3ee" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="markFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#67e8f9"/>
+      <stop offset="100%" stop-color="#0891b2"/>
+    </linearGradient>
+    <pattern id="grid" width="80" height="80" patternUnits="userSpaceOnUse">
+      <path d="M 80 0 L 0 0 0 80" fill="none" stroke="#1a2335" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <!-- background -->
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="630" fill="url(#grid)" opacity="0.55"/>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+
+  <!-- top accent bar -->
+  <rect x="0" y="0" width="1200" height="4" fill="#22d3ee"/>
+
+  <!-- routing line: source node → mark → destination node -->
+  <g opacity="0.35">
+    <circle cx="80" cy="341" r="6" fill="#22d3ee"/>
+    <line x1="92" y1="341" x2="190" y2="341" stroke="#22d3ee" stroke-width="2" stroke-dasharray="6 8"/>
+    <line x1="380" y1="341" x2="1118" y2="341" stroke="#22d3ee" stroke-width="2" stroke-dasharray="6 8"/>
+    <circle cx="1124" cy="341" r="6" fill="#22d3ee"/>
+  </g>
+
+  <!-- gateway/proxy mark: rounded square + double chevron -->
+  <g transform="translate(192, 222)">
+    <rect width="190" height="238" rx="28" fill="url(#markFill)"/>
+    <path d="M58 60 L106 119 L58 178 M104 60 L152 119 L104 178"
+          fill="none" stroke="#06101f" stroke-width="18"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <!-- text block -->
+  <g font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" fill="#e2eaf6">
+    <text x="430" y="252" font-size="20" font-weight="600" letter-spacing="3"
+          fill="#67e8f9" opacity="0.95">
+      NODE.JS · TYPESCRIPT · MIT
+    </text>
+
+    <text x="430" y="334" font-size="92" font-weight="700" letter-spacing="-2">
+      proxyline
+    </text>
+
+    <text x="430" y="388" font-size="28" font-weight="500" fill="#c2cad6">
+      Process-global proxy routing for Node.js
+    </text>
+
+    <g font-size="19" fill="#8d96a4" font-weight="400">
+      <text x="430" y="436">Routes node:http, node:https, fetch,</text>
+      <text x="430" y="463">WebSocket, and HTTP CONNECT through</text>
+      <text x="430" y="490">one explicit, observable policy.</text>
+    </g>
+
+    <text x="430" y="548" font-family="JetBrains Mono, SF Mono, ui-monospace, monospace"
+          font-size="20" font-weight="500" fill="#67e8f9">
+      proxyline.dev
+    </text>
+  </g>
+
+  <!-- bottom accent dots -->
+  <g transform="translate(1050, 548)" opacity="0.85">
+    <circle cx="0" cy="0" r="6" fill="#22d3ee"/>
+    <circle cx="22" cy="0" r="6" fill="#22d3ee" opacity="0.55"/>
+    <circle cx="44" cy="0" r="6" fill="#22d3ee" opacity="0.25"/>
+  </g>
+</svg>
