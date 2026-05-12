@@ -16,8 +16,8 @@ importers:
         version: 7.25.0
     devDependencies:
       '@types/node':
-        specifier: ^20.19.25
-        version: 20.19.39
+        specifier: ^20.19.40
+        version: 20.19.40
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1
@@ -189,8 +189,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@types/node@20.19.39':
-    resolution: {integrity: sha512-orrrD74MBUyK8jOAD/r0+lfa1I2MO6I+vAkmAWzMYbCcgrN4lCrmK52gRFQq/JRxfYPfonkr4b0jcY7Olqdqbw==, tarball: https://packages.atlassian.com/api/npm/npm-remote/@types/node/-/node-20.19.39.tgz}
+  '@types/node@20.19.40':
+    resolution: {integrity: sha512-xxx6M2IpSTnnKcR0cMvIiohkiCx20/oRPtWGbenFygKCGl3zqUzdNjQ/1V4solq1LU+dgv0nQzeGOuqkqZGg0Q==, tarball: https://packages.atlassian.com/api/npm/npm-remote/@types/node/-/node-20.19.40.tgz}
 
   '@types/ws@8.18.1':
     resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==, tarball: https://packages.atlassian.com/api/npm/npm-remote/@types/ws/-/ws-8.18.1.tgz}
@@ -436,13 +436,13 @@ snapshots:
   '@esbuild/win32-x64@0.27.7':
     optional: true
 
-  '@types/node@20.19.39':
+  '@types/node@20.19.40':
     dependencies:
       undici-types: 6.21.0
 
   '@types/ws@8.18.1':
     dependencies:
-      '@types/node': 20.19.39
+      '@types/node': 20.19.40
 
   agent-base@9.0.0: {}
 
