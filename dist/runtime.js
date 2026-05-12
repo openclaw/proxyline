@@ -1,6 +1,6 @@
 import http from "node:http";
 import https from "node:https";
-import { Agent as UndiciAgent, Dispatcher, Headers as UndiciHeaders, Request as UndiciRequest, Response as UndiciResponse, errors as undiciErrors, fetch as undiciFetch, getGlobalDispatcher, ProxyAgent as UndiciProxyAgent, setGlobalDispatcher, } from "undici";
+import { Agent as UndiciAgent, Dispatcher, FormData as UndiciFormData, Headers as UndiciHeaders, Request as UndiciRequest, Response as UndiciResponse, errors as undiciErrors, fetch as undiciFetch, getGlobalDispatcher, ProxyAgent as UndiciProxyAgent, setGlobalDispatcher, } from "undici";
 import { createAmbientProxyResolver, EMPTY_PROXY_ENV, resolveAmbientProxyForUrl, readProxyEnv, } from "./env.js";
 import { bindNodeHttpMethod, createDirectNodeAgent, createNodeProxyAgent, } from "./node-http.js";
 import { formatUrl, ProxylineError, redactProxyUrl, resolveProxyTlsCa, } from "./shared.js";
@@ -10,6 +10,7 @@ let activeRuntime;
 const proxylineHeaders = UndiciHeaders;
 const proxylineRequest = UndiciRequest;
 const proxylineResponse = UndiciResponse;
+const proxylineFormData = UndiciFormData;
 function isFetchRequestLike(value) {
     if (typeof value !== "object" || value === null) {
         return false;
@@ -201,6 +202,7 @@ function installRuntime(resolver, dispatcherOptions, proxyCa) {
     const nodeAgent = createNodeProxyAgent(resolver, proxyCa);
     const originalDispatcher = getGlobalDispatcher();
     const originalFetch = globalThis.fetch;
+    const originalFormData = globalThis.FormData;
     const originalHeaders = globalThis.Headers;
     const originalRequest = globalThis.Request;
     const originalResponse = globalThis.Response;
@@ -210,6 +212,7 @@ function installRuntime(resolver, dispatcherOptions, proxyCa) {
         nodeAgent,
         originalDispatcher,
         originalFetch,
+        originalFormData,
         originalHeaders,
         originalRequest,
         originalResponse,
@@ -225,6 +228,7 @@ function installRuntime(resolver, dispatcherOptions, proxyCa) {
         https.get = bindNodeHttpMethod(snapshot.httpsGet, () => createNodeProxyAgent(resolver, proxyCa));
         setGlobalDispatcher(installedDispatcher);
         globalThis.fetch = proxylineFetch;
+        globalThis.FormData = proxylineFormData;
         globalThis.Headers = proxylineHeaders;
         globalThis.Request = proxylineRequest;
         globalThis.Response = proxylineResponse;
@@ -233,6 +237,7 @@ function installRuntime(resolver, dispatcherOptions, proxyCa) {
         restoreNodeHttpSnapshot(snapshot);
         setGlobalDispatcher(originalDispatcher);
         globalThis.fetch = originalFetch;
+        globalThis.FormData = originalFormData;
         globalThis.Headers = originalHeaders;
         globalThis.Request = originalRequest;
         globalThis.Response = originalResponse;
@@ -250,6 +255,7 @@ function stopRuntime(runtime) {
     restoreNodeHttpSnapshot(runtime.snapshot);
     setGlobalDispatcher(runtime.originalDispatcher);
     globalThis.fetch = runtime.originalFetch;
+    globalThis.FormData = runtime.originalFormData;
     globalThis.Headers = runtime.originalHeaders;
     globalThis.Request = runtime.originalRequest;
     globalThis.Response = runtime.originalResponse;

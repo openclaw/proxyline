@@ -4,6 +4,7 @@ import { ProxyAgent as NodeProxyAgent } from "proxy-agent";
 import {
   Agent as UndiciAgent,
   Dispatcher,
+  FormData as UndiciFormData,
   Headers as UndiciHeaders,
   Request as UndiciRequest,
   Response as UndiciResponse,
@@ -44,6 +45,7 @@ type RuntimeInstall = {
   nodeAgent: NodeProxyAgent;
   originalDispatcher: Dispatcher;
   originalFetch: typeof globalThis.fetch;
+  originalFormData: typeof globalThis.FormData;
   originalHeaders: typeof globalThis.Headers;
   originalRequest: typeof globalThis.Request;
   originalResponse: typeof globalThis.Response;
@@ -57,6 +59,7 @@ let activeRuntime: RuntimeInstall | undefined;
 const proxylineHeaders = UndiciHeaders as unknown as typeof globalThis.Headers;
 const proxylineRequest = UndiciRequest as unknown as typeof globalThis.Request;
 const proxylineResponse = UndiciResponse as unknown as typeof globalThis.Response;
+const proxylineFormData = UndiciFormData as unknown as typeof globalThis.FormData;
 
 type FetchRequestLike = Readonly<{
   arrayBuffer: () => Promise<ArrayBuffer>;
@@ -312,6 +315,7 @@ function installRuntime(
   const nodeAgent = createNodeProxyAgent(resolver, proxyCa);
   const originalDispatcher = getGlobalDispatcher();
   const originalFetch = globalThis.fetch;
+  const originalFormData = globalThis.FormData;
   const originalHeaders = globalThis.Headers;
   const originalRequest = globalThis.Request;
   const originalResponse = globalThis.Response;
@@ -321,6 +325,7 @@ function installRuntime(
     nodeAgent,
     originalDispatcher,
     originalFetch,
+    originalFormData,
     originalHeaders,
     originalRequest,
     originalResponse,
@@ -344,6 +349,7 @@ function installRuntime(
     );
     setGlobalDispatcher(installedDispatcher);
     globalThis.fetch = proxylineFetch;
+    globalThis.FormData = proxylineFormData;
     globalThis.Headers = proxylineHeaders;
     globalThis.Request = proxylineRequest;
     globalThis.Response = proxylineResponse;
@@ -351,6 +357,7 @@ function installRuntime(
     restoreNodeHttpSnapshot(snapshot);
     setGlobalDispatcher(originalDispatcher);
     globalThis.fetch = originalFetch;
+    globalThis.FormData = originalFormData;
     globalThis.Headers = originalHeaders;
     globalThis.Request = originalRequest;
     globalThis.Response = originalResponse;
@@ -369,6 +376,7 @@ function stopRuntime(runtime: RuntimeInstall): void {
   restoreNodeHttpSnapshot(runtime.snapshot);
   setGlobalDispatcher(runtime.originalDispatcher);
   globalThis.fetch = runtime.originalFetch;
+  globalThis.FormData = runtime.originalFormData;
   globalThis.Headers = runtime.originalHeaders;
   globalThis.Request = runtime.originalRequest;
   globalThis.Response = runtime.originalResponse;

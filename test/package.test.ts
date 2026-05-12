@@ -40,6 +40,7 @@ function withProxyEnv<T>(env: Record<string, string | undefined>, run: () => T):
 
 test("package entrypoint patches and restores fetch globals together", async () => {
   const originalFetch = globalThis.fetch;
+  const originalFormData = globalThis.FormData;
   const originalHeaders = globalThis.Headers;
   const originalRequest = globalThis.Request;
   const originalResponse = globalThis.Response;
@@ -50,6 +51,7 @@ test("package entrypoint patches and restores fetch globals together", async () 
   );
   try {
     assert.notEqual(globalThis.fetch, originalFetch);
+    assert.notEqual(globalThis.FormData, originalFormData);
     assert.notEqual(globalThis.Headers, originalHeaders);
     assert.notEqual(globalThis.Request, originalRequest);
     assert.notEqual(globalThis.Response, originalResponse);
@@ -69,9 +71,29 @@ test("package entrypoint patches and restores fetch globals together", async () 
   }
 
   assert.equal(globalThis.fetch, originalFetch);
+  assert.equal(globalThis.FormData, originalFormData);
   assert.equal(globalThis.Headers, originalHeaders);
   assert.equal(globalThis.Request, originalRequest);
   assert.equal(globalThis.Response, originalResponse);
+});
+
+test("package entrypoint global fetch encodes FormData as multipart", async () => {
+  const proxy = withProxyEnv(
+    { HTTP_PROXY: "http://127.0.0.1:9" },
+    () => installGlobalProxy({ mode: "ambient" }),
+  );
+  try {
+    const formData = new globalThis.FormData();
+    formData.set("field", "value");
+    const request = new globalThis.Request("data:text/plain,ok", {
+      body: formData,
+      method: "POST",
+    });
+
+    assert.match(request.headers.get("content-type") ?? "", /^multipart\/form-data; boundary=/);
+  } finally {
+    proxy.stop();
+  }
 });
 
 test("package entrypoint global fetch keeps explicit dispatcher override behavior", async () => {
