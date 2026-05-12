@@ -150,3 +150,29 @@ test("package entrypoint preserves standard options on preinstall Requests", asy
     await lab.close();
   }
 });
+
+test("package entrypoint lets fetch init body replace a consumed preinstall Request body", async () => {
+  const lab = await startProxyLab();
+  const requestUnknown: unknown = Reflect.construct(globalThis.Request, [
+    `${lab.targetUrl}/echo`,
+    { body: "original", method: "POST" },
+  ]);
+  if (!(requestUnknown instanceof globalThis.Request)) {
+    throw new Error("failed to create preinstall Request");
+  }
+  const request = requestUnknown;
+  assert.equal(await request.text(), "original");
+  const proxy = withProxyEnv(
+    { HTTP_PROXY: lab.proxyUrl },
+    () => installGlobalProxy({ mode: "ambient" }),
+  );
+  try {
+    const response = await globalThis.fetch(request, { body: "replacement" });
+
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), "replacement");
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});

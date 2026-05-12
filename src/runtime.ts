@@ -120,6 +120,7 @@ function isFetchRequestLike(value: unknown): value is FetchRequestLike {
 
 async function createProxylineRequestFromRequestLike(
   request: FetchRequestLike,
+  options: { includeBody: boolean },
 ): Promise<globalThis.Request> {
   const init: ProxylineRequestInit = {
     headers: request.headers,
@@ -156,7 +157,12 @@ async function createProxylineRequestFromRequestLike(
   if (request.signal !== undefined) {
     init.signal = request.signal;
   }
-  if (request.body !== null && request.method !== "GET" && request.method !== "HEAD") {
+  if (
+    options.includeBody &&
+    request.body !== null &&
+    request.method !== "GET" &&
+    request.method !== "HEAD"
+  ) {
     init.body = await request.arrayBuffer();
     init.duplex = "half";
   }
@@ -167,17 +173,27 @@ async function createProxylineRequestFromRequestLike(
   return requestUnknown;
 }
 
+function requestInitOverridesBody(init: Parameters<typeof globalThis.fetch>[1]): boolean {
+  if (typeof init !== "object" || init === null) {
+    return false;
+  }
+  return Object.prototype.hasOwnProperty.call(init, "body");
+}
+
 async function normalizeFetchInput(
   input: Parameters<typeof globalThis.fetch>[0],
+  init: Parameters<typeof globalThis.fetch>[1],
 ): Promise<Parameters<typeof globalThis.fetch>[0]> {
   if (input instanceof proxylineRequest || !isFetchRequestLike(input)) {
     return input;
   }
-  return await createProxylineRequestFromRequestLike(input);
+  return await createProxylineRequestFromRequestLike(input, {
+    includeBody: !requestInitOverridesBody(init),
+  });
 }
 
 const proxylineFetch: typeof globalThis.fetch = async (input, init) => {
-  const normalizedInput = await normalizeFetchInput(input);
+  const normalizedInput = await normalizeFetchInput(input, init);
   const response: unknown = await Reflect.apply(
     undiciFetch,
     undefined,

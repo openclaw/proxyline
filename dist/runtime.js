@@ -30,7 +30,7 @@ function isFetchRequestLike(value) {
         typeof record.arrayBuffer === "function" &&
         record.headers !== undefined);
 }
-async function createProxylineRequestFromRequestLike(request) {
+async function createProxylineRequestFromRequestLike(request, options) {
     const init = {
         headers: request.headers,
         method: request.method,
@@ -66,7 +66,10 @@ async function createProxylineRequestFromRequestLike(request) {
     if (request.signal !== undefined) {
         init.signal = request.signal;
     }
-    if (request.body !== null && request.method !== "GET" && request.method !== "HEAD") {
+    if (options.includeBody &&
+        request.body !== null &&
+        request.method !== "GET" &&
+        request.method !== "HEAD") {
         init.body = await request.arrayBuffer();
         init.duplex = "half";
     }
@@ -76,14 +79,22 @@ async function createProxylineRequestFromRequestLike(request) {
     }
     return requestUnknown;
 }
-async function normalizeFetchInput(input) {
+function requestInitOverridesBody(init) {
+    if (typeof init !== "object" || init === null) {
+        return false;
+    }
+    return Object.prototype.hasOwnProperty.call(init, "body");
+}
+async function normalizeFetchInput(input, init) {
     if (input instanceof proxylineRequest || !isFetchRequestLike(input)) {
         return input;
     }
-    return await createProxylineRequestFromRequestLike(input);
+    return await createProxylineRequestFromRequestLike(input, {
+        includeBody: !requestInitOverridesBody(init),
+    });
 }
 const proxylineFetch = async (input, init) => {
-    const normalizedInput = await normalizeFetchInput(input);
+    const normalizedInput = await normalizeFetchInput(input, init);
     const response = await Reflect.apply(undiciFetch, undefined, init === undefined ? [normalizedInput] : [normalizedInput, init]);
     if (!(response instanceof proxylineResponse)) {
         throw new TypeError("Proxyline fetch returned a non-Response value.");
