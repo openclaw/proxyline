@@ -97,13 +97,11 @@ async function normalizeFetchInput(input, init, options) {
     });
 }
 function stripFetchDispatcher(init) {
-    if (typeof init !== "object" ||
-        init === null ||
-        !Object.prototype.hasOwnProperty.call(init, "dispatcher")) {
+    if (typeof init !== "object" || init === null) {
         return init;
     }
     const sanitized = { ...init };
-    Reflect.deleteProperty(sanitized, "dispatcher");
+    Reflect.set(sanitized, "dispatcher", undefined);
     return sanitized;
 }
 const proxylineFetch = async (input, init) => {

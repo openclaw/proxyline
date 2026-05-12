@@ -144,6 +144,21 @@ test("package entrypoint managed fetch ignores explicit dispatcher overrides", a
     assert.notEqual(lab.events.length, 0);
 
     lab.events.splice(0);
+    const inheritedInit = Object.create({ dispatcher: directDispatcher });
+    const inheritedResponseUnknown: unknown = await Reflect.apply(globalThis.fetch, globalThis, [
+      `${lab.targetUrl}/denied`,
+      inheritedInit,
+    ]);
+    if (!(inheritedResponseUnknown instanceof globalThis.Response)) {
+      throw new Error("global fetch returned a non-Response value");
+    }
+    const inheritedResponse = inheritedResponseUnknown;
+
+    assert.equal(inheritedResponse.status, 403);
+    assert.match(await inheritedResponse.text(), /blocked by proxy lab/);
+    assert.notEqual(lab.events.length, 0);
+
+    lab.events.splice(0);
     const requestUnknown: unknown = Reflect.construct(globalThis.Request, [
       `${lab.targetUrl}/denied`,
       { dispatcher: directDispatcher },

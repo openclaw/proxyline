@@ -24,7 +24,7 @@ Returned by `openProxyConnectTunnel`. Inspect the message for the immediate caus
 
 ## fetch / undici still goes direct
 
-- A library is using its own `Dispatcher` and passing it to `fetch` explicitly. Inspect the `dispatcher` option; it overrides the global one. Use `proxy.createUndiciDispatcher()` if you need a Proxyline-aware dispatcher.
+- In ambient mode, a library may be using its own `Dispatcher` and passing it to `fetch` explicitly. Inspect the `dispatcher` option; it overrides the global one outside managed `globalThis.fetch`. Use `proxy.createUndiciDispatcher()` if you need a Proxyline-aware dispatcher.
 - The library was loaded **before** `installProxyline`. Some libraries cache a dispatcher at import time. Install Proxyline first.
 
 ## Caller agent is being ignored

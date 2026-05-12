@@ -200,15 +200,11 @@ async function normalizeFetchInput(
 function stripFetchDispatcher(
   init: Parameters<typeof globalThis.fetch>[1],
 ): Parameters<typeof globalThis.fetch>[1] {
-  if (
-    typeof init !== "object" ||
-    init === null ||
-    !Object.prototype.hasOwnProperty.call(init, "dispatcher")
-  ) {
+  if (typeof init !== "object" || init === null) {
     return init;
   }
   const sanitized = { ...init };
-  Reflect.deleteProperty(sanitized, "dispatcher");
+  Reflect.set(sanitized, "dispatcher", undefined);
   return sanitized;
 }
 

@@ -49,7 +49,7 @@ import { fetch } from "undici";
 await fetch("https://api.example.com/health"); // routed through Proxyline
 ```
 
-If your code creates its own undici `Agent` or `Dispatcher` and passes it explicitly to `fetch`, that explicit instance wins. Use `proxy.createUndiciDispatcher()` to get a dispatcher pre-wired to the same policy.
+In managed mode, Proxyline's patched `globalThis.fetch` ignores explicit `dispatcher` options so a per-call undici `Agent` cannot bypass the managed proxy. In ambient mode, and for callers using imported `undici.fetch` directly, an explicit undici `Agent` or `Dispatcher` still wins. Use `proxy.createUndiciDispatcher()` to get a dispatcher pre-wired to the same policy.
 
 Proxyline also replaces `globalThis.Request`, `Response`, `Headers`, and `FormData` with versions from its undici dependency so `globalThis.fetch` receives compatible objects on Node versions where the built-in fetch no longer shares the package dispatcher. Requests created before Proxyline installs are normalized through the standard public `Request` fields. Install Proxyline first if you need non-standard Request internals, such as a dispatcher embedded in a pre-install native `Request`, to be preserved.
 
