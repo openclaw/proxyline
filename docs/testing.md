@@ -7,12 +7,12 @@ The lab lives in `test/support/proxy-lab.ts`. It is not exported from the packag
 ## Run the suite
 
 ```bash
-pnpm check       # typecheck + tests + build
-pnpm test        # tests only
+pnpm check       # typecheck + test
+pnpm test        # build + unit, integration, and package-entrypoint tests
 pnpm typecheck   # type-only
 ```
 
-`pnpm test` runs `node --test` via `tsx` against `test/index.test.ts` (unit) and `test/e2e.test.ts` (integration).
+`pnpm test` builds `dist/`, then runs `node --test` via `tsx` against `test/index.test.ts` (unit), `test/e2e.test.ts` (integration), and `test/package.test.ts` (package entrypoint).
 
 ## What the lab covers
 

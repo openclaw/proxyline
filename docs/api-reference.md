@@ -15,13 +15,13 @@ Aliased as `installGlobalProxy`. Installs the runtime and returns a handle.
 In managed mode (and active ambient mode), `installProxyline`:
 
 - Captures originals for `http.request`, `http.get`, `http.globalAgent`, `https.request`, `https.get`, `https.globalAgent`.
-- Captures the current undici global dispatcher.
+- Captures the current undici global dispatcher and fetch globals.
 - Installs patched `http.request`/`get`, `https.request`/`get`.
 - Replaces `http.globalAgent` and `https.globalAgent` with a `proxy-agent` `ProxyAgent`.
-- Calls `undici.setGlobalDispatcher` with a `ProxyAgent` (managed) or `EnvHttpProxyAgent` (ambient).
+- Calls `undici.setGlobalDispatcher` with a `ProxyAgent` (managed) or Proxyline's ambient dispatcher (ambient), and patches `globalThis.fetch` plus `Request`, `Response`, `Headers`, and `FormData` to use that dispatcher-compatible fetch stack.
 - Emits `runtime.installed`.
 
-In inactive ambient mode (no proxy env variables), no patches are installed; the handle returns a passive observer with `active: false`.
+In inactive ambient mode (no supported proxy env variables), no patches are installed; the handle returns a passive observer with `active: false`.
 
 ### `openProxyConnectTunnel(options): Promise<net.Socket | tls.TLSSocket>`
 
@@ -57,6 +57,7 @@ Codes:
 - `UNSUPPORTED_PROXY_PROTOCOL` — proxy URL scheme is not `http://` or `https://`.
 - `RUNTIME_ALREADY_ACTIVE` — another Proxyline runtime is already installed.
 - `CONNECT_FAILED` — `openProxyConnectTunnel` failed (bad response, timeout, header overrun, or socket error).
+- `INVALID_CONNECT_TARGET` — `openProxyConnectTunnel` received an empty or unsafe target host, invalid bracket syntax, or an invalid target port.
 
 ## Types
 
@@ -124,6 +125,7 @@ type ProxylineDecision = Readonly<{
 Known `reason` values:
 
 - `"managed-proxy-active"` — managed mode applied.
+- `"managed-proxy-unsupported-url-scheme"` — managed mode is active, but the URL scheme is not one Proxyline can proxy.
 - `"ambient-proxy-active"` — ambient mode resolved a proxy from env.
 - `"ambient-proxy-not-configured"` — ambient mode has no proxy env set, or the URL scheme is unsupported.
 - `"no-proxy-match"` — the URL matched `NO_PROXY`.
@@ -169,11 +171,11 @@ type ProxylineHandle = Readonly<{
 - `mode` — the mode this handle was installed with.
 - `active` — `true` when the runtime is installed and forcing/respecting a proxy.
 - `proxyUrl` — redacted proxy URL string when active.
-- `createNodeAgent()` — proxy-aware `http.Agent` for ad-hoc node:http(s) use. Returns a plain `http.Agent` when inactive.
-- `createUndiciDispatcher()` — proxy-aware undici `Dispatcher`. Returns a plain `UndiciAgent()` when ambient-inactive.
+- `createNodeAgent()` — proxy-aware `http.Agent` for ad-hoc node:http(s) use. Returns a direct agent when inactive or after `stop()`.
+- `createUndiciDispatcher()` — proxy-aware undici `Dispatcher`. Returns a direct `UndiciAgent()` when ambient-inactive or after `stop()`.
 - `createWebSocketAgent()` — same as `createNodeAgent()` but typed for WebSocket clients.
 - `explain(url, options?)` — returns a `ProxylineDecision` and emits a `decision` event.
-- `stop()` — restores the captured Node HTTP(S) stack and undici dispatcher, destroys the proxy agent, emits `runtime.stopped`. Idempotent.
+- `stop()` — restores the captured Node HTTP(S) stack, undici dispatcher, and fetch globals, destroys Proxyline-owned runtime agents/dispatchers, emits `runtime.stopped`. Idempotent.
 
 ### `OpenProxyConnectTunnelOptions`
 

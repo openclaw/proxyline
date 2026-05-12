@@ -36,12 +36,12 @@ Some HTTP clients build absolute-form requests themselves (e.g. `path: "https://
 
 ## undici and fetch
 
-`installGlobalProxy` calls `undici.setGlobalDispatcher` with:
+`installGlobalProxy` calls `undici.setGlobalDispatcher` and patches `globalThis.fetch` to use Proxyline's dispatcher with:
 
 - `undici.ProxyAgent` in managed mode, pointed at `proxyUrl` and trusting `proxyTls` when supplied.
-- `undici.EnvHttpProxyAgent` in ambient mode, configured from the current `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` snapshot, with the same `proxyTls`.
+- Proxyline's ambient dispatcher in ambient mode, resolving each request against the current install-time `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` snapshot, with the same `proxyTls`.
 
-The original dispatcher is captured and restored on `stop()`.
+The original dispatcher and fetch globals are captured and restored on `stop()`.
 
 ```ts
 import { fetch } from "undici";
@@ -49,7 +49,9 @@ import { fetch } from "undici";
 await fetch("https://api.example.com/health"); // routed through Proxyline
 ```
 
-If your code creates its own undici `Agent` or `Dispatcher` and passes it explicitly to `fetch`, that explicit instance wins. Use `proxy.createUndiciDispatcher()` to get a dispatcher pre-wired to the same policy.
+In managed mode, Proxyline's patched `globalThis.fetch` ignores explicit `dispatcher` options so a per-call undici `Agent` cannot bypass the managed proxy. In ambient mode, and for callers using imported `undici.fetch` directly, an explicit undici `Agent` or `Dispatcher` still wins. Use `proxy.createUndiciDispatcher()` to get a dispatcher pre-wired to the same policy.
+
+Proxyline also replaces `globalThis.Request`, `Response`, `Headers`, and `FormData` with versions from its undici dependency so `globalThis.fetch` receives compatible objects on Node versions where the built-in fetch no longer shares the package dispatcher. Requests created before Proxyline installs are normalized through the standard public `Request` fields. Install Proxyline first if you need non-standard Request internals, such as a dispatcher embedded in a pre-install native `Request`, to be preserved.
 
 ## WebSocket
 
@@ -63,7 +65,7 @@ const socket = new WebSocket("wss://events.example.com/", {
 });
 ```
 
-When ambient mode is inactive, `createWebSocketAgent()` returns a plain `http.Agent`, so calling code does not need a conditional path.
+When ambient mode is inactive, `createWebSocketAgent()` returns a direct-routing agent, so calling code does not need a conditional path.
 
 Clients that do **not** expose an `agent` option but still route their handshake through `http.request` are covered automatically by the global patch.
 
@@ -107,4 +109,6 @@ To get a proxy-aware agent without going through the patched globals, use:
 - `proxy.createUndiciDispatcher()` — an undici `Dispatcher` mirroring the current mode.
 - `proxy.createWebSocketAgent()` — an `http.Agent` suitable for WebSocket upgrades.
 
-When the runtime is inactive (ambient mode with no env proxy set), these helpers return plain agents/dispatchers that go direct.
+Helper-created agents and dispatchers are caller-owned. Destroy or close them when the caller is done.
+
+When the runtime is inactive (ambient mode with no env proxy set), these helpers return direct agents/dispatchers.

@@ -5,7 +5,7 @@ import https from "node:https";
 import { type AddressInfo } from "node:net";
 import { URL } from "node:url";
 import test from "node:test";
-import { fetch } from "undici";
+import { Dispatcher, fetch } from "undici";
 import WebSocket from "ws";
 import { createWebSocketServer } from "./support/ws-server.js";
 import { installGlobalProxy, openProxyConnectTunnel } from "../src/index.js";
@@ -266,6 +266,160 @@ test("ambient mode routes undici fetch and helper-created agents through the sam
   }
 });
 
+test("ambient mode routes global fetch through the same env proxy", async () => {
+  const lab = await startProxyLab();
+  const proxy = withProxyEnv({ HTTP_PROXY: lab.proxyUrl }, () =>
+    installGlobalProxy({ mode: "ambient" }),
+  );
+  try {
+    const fetchResponse = await globalThis.fetch(`${lab.targetUrl}/denied`);
+
+    assert.equal(fetchResponse.status, 403);
+    assert.match(await fetchResponse.text(), /blocked by proxy lab/);
+    assert.ok(
+      lab.events.some(
+        (event) =>
+          event.type === "deny" ||
+          (event.type === "deny_connect" && event.path === "/denied"),
+      ),
+    );
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
+test("ambient mode does not reuse a destroyed helper undici dispatcher", async () => {
+  const lab = await startProxyLab();
+  const proxy = withProxyEnv({ HTTP_PROXY: lab.proxyUrl }, () =>
+    installGlobalProxy({ mode: "ambient" }),
+  );
+  const dispatcher = proxy.createUndiciDispatcher();
+  try {
+    await dispatcher.destroy();
+
+    await assert.rejects(fetch(`${lab.targetUrl}/denied`, { dispatcher }));
+    assert.equal(lab.events.length, 0);
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
+test("ambient mode routes undici HTTPS fetch through HTTPS_PROXY", async () => {
+  const lab = await startProxyLab();
+  const proxy = withProxyEnv({ HTTPS_PROXY: lab.proxyUrl }, () =>
+    installGlobalProxy({ mode: "ambient" }),
+  );
+  try {
+    await assert.rejects(fetch("https://127.0.0.1:65000/denied"));
+
+    assert.ok(
+      lab.events.some(
+        (event) => event.type === "deny_connect" && event.authority === "127.0.0.1:65000",
+      ),
+    );
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
+test("ambient mode routes undici HTTPS fetch through ALL_PROXY fallback", async () => {
+  const lab = await startProxyLab();
+  const proxy = withProxyEnv({ ALL_PROXY: lab.proxyUrl }, () =>
+    installGlobalProxy({ mode: "ambient" }),
+  );
+  try {
+    await assert.rejects(fetch("https://127.0.0.1:65000/denied"));
+
+    assert.ok(
+      lab.events.some(
+        (event) => event.type === "deny_connect" && event.authority === "127.0.0.1:65000",
+      ),
+    );
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
+test("ambient mode resolves low-level undici absolute-form paths from origin", async () => {
+  const lab = await startProxyLab();
+  const proxy = withProxyEnv(
+    { HTTP_PROXY: lab.proxyUrl, NO_PROXY: "no-proxy.example" },
+    () => installGlobalProxy({ mode: "ambient" }),
+  );
+  const dispatcher = proxy.createUndiciDispatcher();
+  try {
+    const result = await new Promise<{ body: string; statusCode: number }>((resolve, reject) => {
+      let body = "";
+      let responseStatusCode = 0;
+      dispatcher.dispatch(
+        {
+          method: "GET",
+          origin: lab.targetUrl,
+          path: "http://no-proxy.example/denied",
+        },
+        {
+          onData(chunk: Buffer): boolean {
+            body += chunk.toString("utf8");
+            return true;
+          },
+          onComplete() {
+            resolve({ body, statusCode: responseStatusCode });
+          },
+          onConnect() {},
+          onError: reject,
+          onHeaders(statusCode: number, _headers: Buffer[], resume: () => void): boolean {
+            responseStatusCode = statusCode;
+            resume();
+            return true;
+          },
+        } satisfies Dispatcher.DispatchHandler,
+      );
+    });
+
+    assert.equal(result.statusCode, 403);
+    assert.match(result.body, /blocked by proxy lab/);
+    assert.notEqual(lab.events.length, 0);
+  } finally {
+    await dispatcher.close();
+    proxy.stop();
+    await lab.close();
+  }
+});
+
+test("ambient mode lets undici HTTPS NO_PROXY matches go direct", async () => {
+  const lab = await startProxyLab();
+  const proxy = withProxyEnv({ HTTPS_PROXY: lab.proxyUrl, NO_PROXY: "127.0.0.1" }, () =>
+    installGlobalProxy({ mode: "ambient" }),
+  );
+  try {
+    await assert.rejects(fetch("https://127.0.0.1:65000/denied"));
+
+    assert.equal(lab.events.length, 0);
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
+test("ambient mode does not use HTTP_PROXY for undici HTTPS fetch", async () => {
+  const lab = await startProxyLab();
+  const proxy = withProxyEnv({ HTTP_PROXY: lab.proxyUrl }, () =>
+    installGlobalProxy({ mode: "ambient" }),
+  );
+  try {
+    await assert.rejects(fetch("https://127.0.0.1:65000/denied"));
+
+    assert.equal(lab.events.length, 0);
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
 test("ambient mode uses ALL_PROXY and redacts credentials in explain output", async () => {
   const lab = await startProxyLab();
   const proxyUrl = new URL(lab.proxyUrl);
@@ -283,6 +437,31 @@ test("ambient mode uses ALL_PROXY and redacts credentials in explain output", as
     assert.equal(decision.reason, "ambient-proxy-active");
     assert.equal(decision.proxyUrl, lab.proxyUrl + "/");
     assert.doesNotMatch(JSON.stringify(decision), /user|secret/);
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
+test("ambient mode falls back to ALL_PROXY when HTTP_PROXY scheme is unsupported", async () => {
+  const lab = await startProxyLab();
+  const proxy = withProxyEnv(
+    { HTTP_PROXY: "socks-not-supported://specific.example:1080", ALL_PROXY: lab.proxyUrl },
+    () => installGlobalProxy({ mode: "ambient" }),
+  );
+  try {
+    const nodeResponse = await readHttp(`${lab.targetUrl}/denied`);
+    const fetchResponse = await fetch(`${lab.targetUrl}/denied`);
+
+    assert.equal(nodeResponse.status, 403);
+    assert.equal(fetchResponse.status, 403);
+    assert.ok(
+      lab.events.filter(
+        (event) =>
+          event.type === "deny" ||
+          (event.type === "deny_connect" && event.path === "/denied"),
+      ).length >= 2,
+    );
   } finally {
     proxy.stop();
     await lab.close();
@@ -452,6 +631,140 @@ test("managed mode overrides a caller-provided direct node:http agent", async ()
   }
 });
 
+test("stopped handles create direct helper agents", async () => {
+  const lab = await startProxyLab();
+  const proxy = installGlobalProxy({ mode: "managed", proxyUrl: lab.proxyUrl });
+  proxy.stop();
+  const helperAgent = proxy.createNodeAgent();
+  try {
+    const deniedDirect = await readHttp(`${lab.targetUrl}/denied`, helperAgent);
+
+    assert.equal(deniedDirect.status, 200);
+    assert.equal(deniedDirect.body, "target denied endpoint reached unexpectedly\n");
+    assert.equal(lab.events.length, 0);
+  } finally {
+    helperAgent.destroy();
+    await lab.close();
+  }
+});
+
+test("stopped handles create direct helper agents for HTTPS", async () => {
+  const lab = await startProxyLab({ secureTarget: true });
+  assert.ok(lab.targetCa);
+  const proxy = installGlobalProxy({ mode: "managed", proxyUrl: lab.proxyUrl });
+  proxy.stop();
+  const helperAgent = proxy.createNodeAgent();
+  try {
+    const deniedDirect = await readHttps(`${lab.targetUrl}/denied`, {
+      agent: helperAgent,
+      ca: lab.targetCa,
+    });
+
+    assert.equal(deniedDirect.status, 200);
+    assert.equal(deniedDirect.body, "target denied endpoint reached unexpectedly\n");
+    assert.equal(lab.events.length, 0);
+  } finally {
+    helperAgent.destroy();
+    await lab.close();
+  }
+});
+
+test("inactive ambient handles create direct helper agents for HTTPS", async () => {
+  const lab = await startProxyLab({ secureTarget: true });
+  assert.ok(lab.targetCa);
+  const proxy = withProxyEnv({}, () => installGlobalProxy({ mode: "ambient" }));
+  const helperAgent = proxy.createNodeAgent();
+  try {
+    const deniedDirect = await readHttps(`${lab.targetUrl}/denied`, {
+      agent: helperAgent,
+      ca: lab.targetCa,
+    });
+
+    assert.equal(proxy.active, false);
+    assert.equal(deniedDirect.status, 200);
+    assert.equal(deniedDirect.body, "target denied endpoint reached unexpectedly\n");
+    assert.equal(lab.events.length, 0);
+  } finally {
+    helperAgent.destroy();
+    proxy.stop();
+    await lab.close();
+  }
+});
+
+test("stopped handles create direct undici helper dispatchers", async () => {
+  const lab = await startProxyLab();
+  const proxy = installGlobalProxy({ mode: "managed", proxyUrl: lab.proxyUrl });
+  proxy.stop();
+  const dispatcher = proxy.createUndiciDispatcher();
+  try {
+    const deniedDirect = await fetch(`${lab.targetUrl}/denied`, { dispatcher });
+
+    assert.equal(deniedDirect.status, 200);
+    assert.equal(await deniedDirect.text(), "target denied endpoint reached unexpectedly\n");
+    assert.equal(lab.events.length, 0);
+  } finally {
+    await dispatcher.close();
+    await lab.close();
+  }
+});
+
+test("stopped handles create direct websocket helper agents", async () => {
+  const lab = await startProxyLab();
+  const wsServer = await createWebSocketServer();
+  const proxy = installGlobalProxy({ mode: "managed", proxyUrl: lab.proxyUrl });
+  proxy.stop();
+  const helperAgent = proxy.createWebSocketAgent();
+  try {
+    const ws = new WebSocket(wsServer.url, { agent: helperAgent });
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", () => {
+        ws.send("ping");
+      });
+      ws.once("message", (data) => {
+        assert.equal(data.toString(), "echo:ping");
+        resolve();
+      });
+      ws.once("error", reject);
+    });
+    ws.close();
+
+    assert.equal(lab.events.length, 0);
+  } finally {
+    helperAgent.destroy();
+    await wsServer.close();
+    await lab.close();
+  }
+});
+
+test("stopped handles create direct secure websocket helper agents", async () => {
+  const lab = await startProxyLab();
+  const wsServer = await createWebSocketServer({ secure: true });
+  assert.ok(wsServer.ca);
+  const proxy = installGlobalProxy({ mode: "managed", proxyUrl: lab.proxyUrl });
+  proxy.stop();
+  const helperAgent = proxy.createWebSocketAgent();
+  try {
+    const ws = new WebSocket(wsServer.url, { agent: helperAgent, ca: wsServer.ca });
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", () => {
+        ws.send("ping");
+      });
+      ws.once("message", (data) => {
+        assert.equal(data.toString(), "echo:ping");
+        resolve();
+      });
+      ws.once("error", reject);
+    });
+    ws.close();
+
+    assert.equal(lab.events.length, 0);
+  } finally {
+    helperAgent.destroy();
+    await wsServer.close();
+    await lab.close();
+  }
+});
+
 test("managed mode preserves caller-provided HTTPS agent TLS options while forcing proxy routing", async () => {
   const lab = await startProxyLab({ secureTarget: true });
   assert.ok(lab.targetCa);
@@ -515,6 +828,24 @@ test("managed mode trusts an HTTPS proxy endpoint with scoped CA", async () => {
       ).length >= 2,
     );
   } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
+test("managed mode keeps destination TLS options from weakening HTTPS proxy TLS", async () => {
+  const lab = await startProxyLab({ secureProxy: true, secureTarget: true });
+  const proxy = installGlobalProxy({ mode: "managed", proxyUrl: lab.proxyUrl });
+  const callerAgent = new https.Agent({ rejectUnauthorized: false });
+  try {
+    await assert.rejects(
+      readHttps(`${lab.targetUrl}/allowed`, { agent: callerAgent }),
+      /self-signed certificate/,
+    );
+
+    assert.equal(lab.events.length, 0);
+  } finally {
+    callerAgent.destroy();
     proxy.stop();
     await lab.close();
   }

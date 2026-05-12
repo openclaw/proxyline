@@ -2,6 +2,8 @@
 
 ## 0.1.1 - Unreleased
 
+- Hardened ambient proxy routing, CONNECT target validation, undici dispatcher cleanup, and generated package output after the runtime module split.
+
 ## 0.1.0 - 2026-05-11
 
 - Initial public release of `@openclaw/proxyline` for process-global proxy routing in Node.js.

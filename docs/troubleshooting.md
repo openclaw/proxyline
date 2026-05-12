@@ -24,7 +24,7 @@ Returned by `openProxyConnectTunnel`. Inspect the message for the immediate caus
 
 ## fetch / undici still goes direct
 
-- A library is using its own `Dispatcher` and passing it to `fetch` explicitly. Inspect the `dispatcher` option; it overrides the global one. Use `proxy.createUndiciDispatcher()` if you need a Proxyline-aware dispatcher.
+- In ambient mode, a library may be using its own `Dispatcher` and passing it to `fetch` explicitly. Inspect the `dispatcher` option; it overrides the global one outside managed `globalThis.fetch`. Use `proxy.createUndiciDispatcher()` if you need a Proxyline-aware dispatcher.
 - The library was loaded **before** `installProxyline`. Some libraries cache a dispatcher at import time. Install Proxyline first.
 
 ## Caller agent is being ignored
@@ -59,7 +59,7 @@ Each test should call `proxy.stop()` in its teardown. Without that, the next ins
 
 ## Ambient mode reports `active: false`
 
-No proxy variables are set. Check `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` (and their lowercase forms). `NO_PROXY` alone is not enough to activate the runtime. See [Environment Variables](./environment-variables.md).
+No supported proxy variables are set. Check `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` (and their lowercase forms), and make sure their values use `http://` or `https://`. `NO_PROXY` alone is not enough to activate the runtime. See [Environment Variables](./environment-variables.md).
 
 ## `NO_PROXY` is not matching as expected
 

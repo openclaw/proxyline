@@ -1,12 +1,12 @@
 ---
 title: Overview
 permalink: /
-description: "Process-global proxy routing for Node.js. One install routes node:http, node:https, undici/fetch, WebSocket, and HTTP CONNECT traffic through a single explicit policy."
+description: "Process-global proxy routing for Node.js. One install routes node:http, node:https, undici/fetch, plus WebSocket and HTTP CONNECT helpers through a single explicit policy."
 ---
 
 # Proxyline Documentation
 
-Process-global proxy routing for Node.js. Proxyline patches the network surfaces a Node process can reach without owning a private transport stack, so a single policy applies to `node:http`, `node:https`, undici/fetch, WebSocket clients, and explicit HTTP CONNECT tunnels.
+Process-global proxy routing for Node.js. Proxyline patches the network surfaces a Node process can reach without owning a private transport stack, so a single policy applies to `node:http`, `node:https`, undici/fetch, WebSocket clients that accept agents, and explicit HTTP CONNECT helpers.
 
 ## Contents
 
@@ -27,10 +27,10 @@ Process-global proxy routing for Node.js. Proxyline patches the network surfaces
 | --- | --- | --- |
 | `http.request` / `http.get` | yes | global method patch + global agent swap |
 | `https.request` / `https.get` | yes | global method patch + global agent swap |
-| `fetch` / undici global dispatcher | yes | `setGlobalDispatcher` |
+| `fetch` / undici global dispatcher | yes | `globalThis.fetch` patch + `setGlobalDispatcher` |
 | WebSocket clients accepting a Node `agent` | yes | `proxy.createWebSocketAgent()` |
 | WebSocket clients without an `agent` option | partial | upgrade reuses patched `http.request` |
 | Explicit HTTP CONNECT socket | yes | `openProxyConnectTunnel()` |
-| Caller-built `http.Agent` / `https.Agent` | overridden in managed mode | per-request agent replacement |
+| Caller-built `http.Agent` / `https.Agent` | overridden in managed and active ambient mode | per-request agent replacement |
 | Raw `net.connect` / `tls.connect` | no | out of scope — see [Security](./security.md) |
 | Native or third-party transport stacks | no | out of scope — see [Security](./security.md) |

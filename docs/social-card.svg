@@ -58,9 +58,9 @@
     </text>
 
     <g font-size="19" fill="#8d96a4" font-weight="400">
-      <text x="430" y="436">Routes node:http, node:https, fetch,</text>
-      <text x="430" y="463">WebSocket, and HTTP CONNECT through</text>
-      <text x="430" y="490">one explicit, observable policy.</text>
+      <text x="430" y="436">Routes node:http, node:https, and fetch</text>
+      <text x="430" y="463">with helper agents for WebSocket and</text>
+      <text x="430" y="490">HTTP CONNECT traffic.</text>
     </g>
 
     <text x="430" y="548" font-family="JetBrains Mono, SF Mono, ui-monospace, monospace"

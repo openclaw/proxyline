@@ -2,6 +2,12 @@
 
 Proxyline is a Node-process runtime, not an operating-system sandbox. Understanding what it does — and what it cannot do — is essential before relying on it as a policy.
 
+## Assurance model
+
+Proxyline's runtime assurances assume it is installed before application and plugin networking code is loaded. Install it as the first import in the process when proxy routing is part of the security posture.
+
+These assurances apply to the surfaces Proxyline patches or helpers it creates. They do not apply to code that captured networking functions before installation, raw sockets, native transports, or separate bundled transport stacks.
+
 ## What Proxyline enforces
 
 In **managed** mode, Proxyline forces traffic through the configured proxy on the surfaces it covers:
@@ -10,11 +16,11 @@ In **managed** mode, Proxyline forces traffic through the configured proxy on th
 - `https.request` / `https.get` / `https.globalAgent`
 - The undici global dispatcher (i.e. `fetch`)
 - WebSocket clients that accept a Node `agent`, via `proxy.createWebSocketAgent()` or by reusing the patched `http.request` during the upgrade
-- Explicit HTTP CONNECT via `openProxyConnectTunnel`
+- Explicit HTTP CONNECT when callers opt in to `openProxyConnectTunnel`
 
 Caller-supplied `http.Agent` / `https.Agent` instances are replaced per request, and `createConnection` overrides are stripped. TLS-relevant agent options are lifted onto the request so destination TLS still validates correctly.
 
-In **ambient** mode the same surfaces are covered when at least one of `HTTP_PROXY`, `HTTPS_PROXY`, or `ALL_PROXY` is set, and `NO_PROXY` is honored.
+In **ambient** mode the same surfaces are covered when at least one supported `http://` or `https://` proxy endpoint is set through `HTTP_PROXY`, `HTTPS_PROXY`, or `ALL_PROXY`; unsupported proxy schemes are ignored, and `NO_PROXY` is honored.
 
 ## What Proxyline cannot enforce
 
@@ -22,10 +28,11 @@ Anything that does not flow through the patched APIs:
 
 - Direct `net.connect` or `tls.connect` calls. Code that opens raw sockets is not seen by Proxyline.
 - Native modules with private transport stacks (e.g. some database drivers, gRPC C bindings).
-- Libraries that own their own `Dispatcher` and pass it explicitly to undici. The global dispatcher patch is overridden by an explicit one.
+- Libraries that import and call `undici.fetch` directly with their own explicit `Dispatcher`. Proxyline's managed `globalThis.fetch` strips explicit dispatchers, but it cannot rewrite every imported undici function reference.
 - DNS resolution itself. Proxyline tells the proxy a hostname; DNS-based exfiltration via the local resolver is out of scope.
 - Sockets opened **before** `installProxyline` ran. Existing keepalive connections continue to use whatever transport they were created with.
 - Module references captured before `installProxyline` ran. Anything that stored `http.request` in a local variable at import time keeps the un-patched reference.
+- Non-standard internals on native `Request` objects created before `installProxyline` ran. Proxyline can normalize standard Request fields, but runtimes do not expose every internal field consistently.
 
 For a process-wide proxy enforcement policy, combine Proxyline with operating-system level controls (egress firewall rules, network namespaces, seccomp, or a sidecar proxy).
 
@@ -60,7 +67,8 @@ This is deliberate: two competing proxy patches would race on `http.request` and
 | Threat | Mitigated | Notes |
 | --- | --- | --- |
 | Library passes a direct `http.Agent` per request | yes (managed) | Replaced before the request runs |
-| Library passes a direct `Dispatcher` to `fetch` | no | Global dispatcher is patched, explicit ones win |
+| Library passes a direct `Dispatcher` to managed `globalThis.fetch` | yes | Explicit dispatchers are stripped |
+| Library calls imported `undici.fetch` with a direct `Dispatcher` | no | Imported function references are outside the global fetch patch |
 | Library uses `net.connect` directly | no | Out of scope |
 | Library captured `http.request` at import time | no (if before install) | Install Proxyline first |
 | Environment variable set after install | no | Snapshot at install time |

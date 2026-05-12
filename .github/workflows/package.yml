@@ -50,3 +50,6 @@ jobs:
 
       - name: Dry-run package
         run: pnpm package:dry-run
+
+      - name: Check generated output
+        run: git diff --exit-code -- dist

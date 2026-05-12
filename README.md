@@ -4,9 +4,11 @@
 [![node](https://img.shields.io/node/v/%40openclaw%2Fproxyline.svg)](https://nodejs.org/)
 [![license](https://img.shields.io/npm/l/%40openclaw%2Fproxyline.svg)](./LICENSE)
 
-Process-global proxy routing for Node.js. One install replaces `node:http`, `node:https`, the undici/fetch global dispatcher, and routes WebSocket and explicit HTTP CONNECT traffic through the same policy.
+Process-global proxy routing for Node.js. One install replaces `node:http`, `node:https`, the undici/fetch global dispatcher, and provides WebSocket and explicit HTTP CONNECT helpers for the same policy.
 
 Proxyline exists to make proxy behavior **explicit, observable, and hard to bypass accidentally** — so that "all egress goes through this gateway" is something you encode in code rather than hope for from environment variables.
+
+Proxyline's runtime assurances assume it is installed before application and plugin networking code is loaded. Code that captured networking functions before installation, uses raw sockets, or owns a private/native transport stack is outside the normal Proxyline model.
 
 Website: [proxyline.dev](https://proxyline.dev)
 
@@ -14,10 +16,10 @@ Website: [proxyline.dev](https://proxyline.dev)
 
 - **Two modes.** `managed` forces traffic through a configured proxy and fails closed on bad config. `ambient` reads `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY` for tooling that needs environment compatibility.
 - **Covers the surfaces that matter.** `http.request`, `http.get`, `https.request`, `https.get`, both global agents, the undici global dispatcher, and helpers for WebSocket agents and HTTP CONNECT sockets.
-- **Replaces caller agents.** In managed mode, a per-request `http.Agent` passed by a library does not bypass the proxy. TLS options on the caller agent (`ca`, `cert`, `key`, `rejectUnauthorized`, …) are preserved so destination TLS still validates.
+- **Replaces caller agents.** In managed mode and active ambient mode, a per-request `http.Agent` passed by a library does not bypass the proxy. TLS options on the caller agent (`ca`, `cert`, `key`, `rejectUnauthorized`, …) are preserved so destination TLS still validates.
 - **Scoped proxy CA trust.** `proxyTls.ca` / `proxyTls.caFile` trust a private CA for the proxy endpoint only — no `NODE_EXTRA_CA_CERTS` and no `NODE_TLS_REJECT_UNAUTHORIZED=0`.
 - **Observable.** `proxy.explain(url)` returns a structured decision (`proxied` / `direct` with a `reason`), and an `onEvent` callback receives `runtime.installed`, `runtime.stopped`, and per-decision events. Proxy URLs are credential-redacted.
-- **Restoreable.** `proxy.stop()` restores the captured Node HTTP(S) methods, global agents, and undici dispatcher. The runtime is a process-wide singleton — a second install throws `RUNTIME_ALREADY_ACTIVE`.
+- **Restoreable.** `proxy.stop()` restores the captured Node HTTP(S) methods, global agents, undici dispatcher, and fetch globals. The runtime is a process-wide singleton — a second install throws `RUNTIME_ALREADY_ACTIVE`.
 
 ## Install
 
@@ -27,7 +29,7 @@ pnpm add @openclaw/proxyline
 npm install @openclaw/proxyline
 ```
 
-Requires Node 20+.
+Requires Node 20.18.1+.
 
 ## Quick start
 
@@ -87,9 +89,9 @@ const socket = await openProxyConnectTunnel({
 | --- | --- | --- |
 | `http.request` / `http.get` | yes | global method patch + global agent swap |
 | `https.request` / `https.get` | yes | global method patch + global agent swap |
-| `fetch` / undici global dispatcher | yes | `setGlobalDispatcher` |
+| `fetch` / undici global dispatcher | yes | `globalThis.fetch` patch + `setGlobalDispatcher` |
 | WebSocket clients accepting a Node `agent` | yes | `proxy.createWebSocketAgent()` |
-| Caller-built `http.Agent` / `https.Agent` | overridden in managed mode | TLS options preserved |
+| Caller-built `http.Agent` / `https.Agent` | overridden in managed and active ambient mode | TLS options preserved |
 | Explicit HTTP CONNECT socket | yes | `openProxyConnectTunnel()` |
 | Raw `net.connect` / `tls.connect` | no | out of scope, see [Security](./docs/security.md) |
 | Native or private transport stacks | no | out of scope, see [Security](./docs/security.md) |

@@ -7,5 +7,6 @@ export declare class ProxylineError extends Error {
     constructor(code: string, message: string);
 }
 export declare function resolveProxyTlsCa(options: ProxylineTlsOptions | undefined): string | undefined;
+export declare function formatUrl(value: string | URL): string;
 export declare function redactProxyUrl(value: string | URL): string;
 //# sourceMappingURL=shared.d.ts.map

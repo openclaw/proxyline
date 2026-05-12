@@ -1,12 +1,50 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
 import {
   installGlobalProxy,
   installProxyline,
+  openProxyConnectTunnel,
   ProxylineError,
   redactProxyUrl,
   type ProxylineEvent,
 } from "../src/index.js";
+import { formatConnectAuthority } from "../src/connect.js";
+import { CALLER_AGENT_TLS_OPTION_KEYS } from "../src/node-http.js";
+
+function withProxyEnv<T>(env: Record<string, string | undefined>, run: () => T): T {
+  const keys = [
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "no_proxy",
+  ] as const;
+  const previous: Record<string, string | undefined> = {};
+  for (const key of keys) {
+    previous[key] = process.env[key];
+    delete process.env[key];
+  }
+  for (const [key, value] of Object.entries(env)) {
+    if (value !== undefined) {
+      process.env[key] = value;
+    }
+  }
+  try {
+    return run();
+  } finally {
+    for (const key of keys) {
+      if (previous[key] === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = previous[key];
+      }
+    }
+  }
+}
 
 test("managed mode requires an explicit proxy URL", () => {
   assert.throws(
@@ -41,6 +79,23 @@ test("managed mode explains proxied decisions without leaking credentials", () =
   }
 });
 
+test("managed mode explains unsupported URL schemes as direct", () => {
+  const proxy = installGlobalProxy({
+    mode: "managed",
+    proxyUrl: "https://proxy.example:8443",
+  });
+
+  try {
+    const decision = proxy.explain("ftp://api.example.com/resource", { surface: "unknown" });
+
+    assert.equal(decision.kind, "direct");
+    assert.equal(decision.reason, "managed-proxy-unsupported-url-scheme");
+    assert.equal(decision.proxyUrl, undefined);
+  } finally {
+    proxy.stop();
+  }
+});
+
 test("ambient mode can be inactive and explain direct routing", () => {
   const proxy = installProxyline({ mode: "ambient" });
 
@@ -64,9 +119,142 @@ test("ambient mode ignores explicit proxyUrl", () => {
   assert.equal(decision.reason, "ambient-proxy-not-configured");
 });
 
+test("ambient mode treats lower-case proxy env as higher precedence", () => {
+  const proxy = withProxyEnv(
+    {
+      HTTP_PROXY: "http://upper.example:8080",
+      http_proxy: "http://lower.example:8080",
+    },
+    () => installProxyline({ mode: "ambient" }),
+  );
+  try {
+    const decision = proxy.explain("http://api.example.com/");
+
+    assert.equal(decision.kind, "proxied");
+    assert.equal(decision.proxyUrl, "http://lower.example:8080/");
+  } finally {
+    proxy.stop();
+  }
+});
+
+test("ambient mode ignores unsupported proxy schemes", () => {
+  const proxy = withProxyEnv(
+    { ALL_PROXY: "socks-not-supported://proxy.example:1080" },
+    () => installProxyline({ mode: "ambient" }),
+  );
+  try {
+    assert.equal(proxy.active, false);
+  } finally {
+    proxy.stop();
+  }
+});
+
+test("ambient mode falls back to ALL_PROXY when protocol proxy scheme is unsupported", () => {
+  const proxy = withProxyEnv(
+    {
+      HTTP_PROXY: "socks-not-supported://specific.example:1080",
+      ALL_PROXY: "http://fallback.example:8080",
+    },
+    () => installProxyline({ mode: "ambient" }),
+  );
+  try {
+    const decision = proxy.explain("http://api.example.com/");
+
+    assert.equal(proxy.active, true);
+    assert.equal(proxy.proxyUrl, "http://fallback.example:8080/");
+    assert.equal(decision.kind, "proxied");
+    assert.equal(decision.proxyUrl, "http://fallback.example:8080/");
+  } finally {
+    proxy.stop();
+  }
+});
+
+test("ambient mode explains unsupported URL schemes as not configured", () => {
+  const proxy = withProxyEnv(
+    { HTTP_PROXY: "http://proxy.example:8080", NO_PROXY: "corp.example" },
+    () => installProxyline({ mode: "ambient" }),
+  );
+  try {
+    const decision = proxy.explain("ftp://corp.example/resource");
+
+    assert.equal(decision.kind, "direct");
+    assert.equal(decision.reason, "ambient-proxy-not-configured");
+  } finally {
+    proxy.stop();
+  }
+});
+
+test("ambient mode suffix no-proxy entries also match the root host", () => {
+  for (const noProxy of [".corp.example", "*.corp.example"]) {
+    const proxy = withProxyEnv(
+      { HTTP_PROXY: "http://proxy.example:8080", NO_PROXY: noProxy },
+      () => installProxyline({ mode: "ambient" }),
+    );
+    try {
+      const decision = proxy.explain("http://corp.example/");
+
+      assert.equal(decision.kind, "direct");
+      assert.equal(decision.reason, "no-proxy-match");
+    } finally {
+      proxy.stop();
+    }
+  }
+});
+
 test("redactProxyUrl removes credentials, search, and hash", () => {
   assert.equal(
     redactProxyUrl("https://user:secret@proxy.example:8443/path?q=1#frag"),
     "https://proxy.example:8443/path",
+  );
+});
+
+test("documented TLS preservation keys match runtime list", () => {
+  const surfacesDoc = fs.readFileSync("docs/surfaces.md", "utf8").replace(/\r\n/g, "\n");
+  const match = surfacesDoc.match(
+    /TLS identity preservation[\s\S]*?\n\n(`[^`\n]+`(?:, `[^`\n]+`)*)\./,
+  );
+  assert.ok(match);
+  const documentedKeys = match[1]?.split(", ").map((key) => key.replace(/`/g, ""));
+
+  assert.deepEqual(documentedKeys, [...CALLER_AGENT_TLS_OPTION_KEYS]);
+});
+
+test("CONNECT authority formatting rejects unsafe hosts and brackets IPv6", () => {
+  assert.equal(formatConnectAuthority("::1", 443), "[::1]:443");
+  assert.equal(formatConnectAuthority("[::1]", 443), "[::1]:443");
+  assert.throws(
+    () => formatConnectAuthority("api.example.com\r\nProxy-Authorization: injected", 443),
+    (error: unknown) =>
+      error instanceof ProxylineError && error.code === "INVALID_CONNECT_TARGET",
+  );
+  assert.throws(
+    () => formatConnectAuthority("api.example.com", 0),
+    (error: unknown) =>
+      error instanceof ProxylineError && error.code === "INVALID_CONNECT_TARGET",
+  );
+  for (const unsafeHost of [
+    "api.example.com:443",
+    "api.example.com/path",
+    "user@api.example.com",
+    "api.example.com?debug=true",
+    "api.example.com#fragment",
+  ]) {
+    assert.throws(
+      () => formatConnectAuthority(unsafeHost, 443),
+      (error: unknown) =>
+        error instanceof ProxylineError && error.code === "INVALID_CONNECT_TARGET",
+    );
+  }
+});
+
+test("CONNECT helper rejects unsupported proxy schemes with the documented code", async () => {
+  await assert.rejects(
+    openProxyConnectTunnel({
+      proxyUrl: "socks://proxy.example:1080",
+      targetHost: "api.example.com",
+      targetPort: 443,
+    }),
+    (error: unknown) =>
+      error instanceof ProxylineError && error.code === "UNSUPPORTED_PROXY_PROTOCOL",
   );
 });

@@ -2,7 +2,7 @@
 
 Process-global proxy routing for Node.js.
 
-Proxyline patches the network surfaces a Node process can reach without owning a private transport stack, so one policy applies to `node:http`, `node:https`, undici/fetch, WebSocket clients, and explicit HTTP CONNECT tunnels.
+Proxyline patches the network surfaces a Node process can reach without owning a private transport stack, so one policy applies to `node:http`, `node:https`, undici/fetch, WebSocket clients that accept agents, and explicit HTTP CONNECT helpers.
 
 ## Start
 

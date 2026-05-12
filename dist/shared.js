@@ -19,6 +19,9 @@ export function resolveProxyTlsCa(options) {
     }
     return undefined;
 }
+export function formatUrl(value) {
+    return value instanceof URL ? value.href : new URL(value).href;
+}
 export function redactProxyUrl(value) {
     const url = value instanceof URL ? new URL(value.href) : new URL(value);
     url.username = "";
