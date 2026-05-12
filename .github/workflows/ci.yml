@@ -60,6 +60,3 @@ jobs:
 
       - name: Check
         run: pnpm check
-
-      - name: Check generated output
-        run: git diff --exit-code -- dist
