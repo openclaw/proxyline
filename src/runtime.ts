@@ -61,6 +61,10 @@ const proxylineRequest = UndiciRequest as unknown as typeof globalThis.Request;
 const proxylineResponse = UndiciResponse as unknown as typeof globalThis.Response;
 const proxylineFormData = UndiciFormData as unknown as typeof globalThis.FormData;
 
+type ProxylineRequestInit = RequestInit & {
+  dispatcher?: unknown;
+};
+
 type FetchRequestLike = Readonly<{
   arrayBuffer: () => Promise<ArrayBuffer>;
   body: ReadableStream<Uint8Array> | null;
@@ -69,6 +73,16 @@ type FetchRequestLike = Readonly<{
   signal?: AbortSignal;
   url: string;
 }>;
+
+function getRequestDispatcher(request: FetchRequestLike): unknown {
+  for (const symbol of Object.getOwnPropertySymbols(request)) {
+    if (symbol.description !== "dispatcher") {
+      continue;
+    }
+    return Reflect.get(request, symbol);
+  }
+  return undefined;
+}
 
 function isFetchRequestLike(value: unknown): value is FetchRequestLike {
   if (typeof value !== "object" || value === null) {
@@ -86,10 +100,14 @@ function isFetchRequestLike(value: unknown): value is FetchRequestLike {
 async function createProxylineRequestFromRequestLike(
   request: FetchRequestLike,
 ): Promise<globalThis.Request> {
-  const init: RequestInit = {
+  const init: ProxylineRequestInit = {
     headers: request.headers,
     method: request.method,
   };
+  const dispatcher = getRequestDispatcher(request);
+  if (dispatcher !== undefined) {
+    Reflect.set(init, "dispatcher", dispatcher);
+  }
   if (request.signal !== undefined) {
     init.signal = request.signal;
   }
@@ -97,7 +115,11 @@ async function createProxylineRequestFromRequestLike(
     init.body = await request.arrayBuffer();
     init.duplex = "half";
   }
-  return new proxylineRequest(request.url, init);
+  const requestUnknown: unknown = Reflect.construct(proxylineRequest, [request.url, init]);
+  if (!(requestUnknown instanceof proxylineRequest)) {
+    throw new TypeError("Proxyline failed to normalize a fetch Request.");
+  }
+  return requestUnknown;
 }
 
 async function normalizeFetchInput(

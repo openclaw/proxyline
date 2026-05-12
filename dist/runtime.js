@@ -11,6 +11,15 @@ const proxylineHeaders = UndiciHeaders;
 const proxylineRequest = UndiciRequest;
 const proxylineResponse = UndiciResponse;
 const proxylineFormData = UndiciFormData;
+function getRequestDispatcher(request) {
+    for (const symbol of Object.getOwnPropertySymbols(request)) {
+        if (symbol.description !== "dispatcher") {
+            continue;
+        }
+        return Reflect.get(request, symbol);
+    }
+    return undefined;
+}
 function isFetchRequestLike(value) {
     if (typeof value !== "object" || value === null) {
         return false;
@@ -26,6 +35,10 @@ async function createProxylineRequestFromRequestLike(request) {
         headers: request.headers,
         method: request.method,
     };
+    const dispatcher = getRequestDispatcher(request);
+    if (dispatcher !== undefined) {
+        Reflect.set(init, "dispatcher", dispatcher);
+    }
     if (request.signal !== undefined) {
         init.signal = request.signal;
     }
@@ -33,7 +46,11 @@ async function createProxylineRequestFromRequestLike(request) {
         init.body = await request.arrayBuffer();
         init.duplex = "half";
     }
-    return new proxylineRequest(request.url, init);
+    const requestUnknown = Reflect.construct(proxylineRequest, [request.url, init]);
+    if (!(requestUnknown instanceof proxylineRequest)) {
+        throw new TypeError("Proxyline failed to normalize a fetch Request.");
+    }
+    return requestUnknown;
 }
 async function normalizeFetchInput(input) {
     if (input instanceof proxylineRequest || !isFetchRequestLike(input)) {
