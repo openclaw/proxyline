@@ -8,6 +8,8 @@ export {
 } from "./shared.js";
 export type {
   ExplainOptions,
+  ProxylineBypassPolicy,
+  ProxylineBypassRequest,
   ProxylineDecision,
   ProxylineEvent,
   ProxylineHandle,

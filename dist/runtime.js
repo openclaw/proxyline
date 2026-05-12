@@ -140,7 +140,13 @@ function isProxyableUrlProtocol(protocol) {
         protocol === "ws:" ||
         protocol === "wss:";
 }
-function createManagedProxyResolver(proxyUrl) {
+function shouldBypassManagedProxy(bypassPolicy, url, surface) {
+    if (bypassPolicy === undefined) {
+        return false;
+    }
+    return bypassPolicy({ surface, url: formatUrl(url) });
+}
+function createManagedProxyResolver(proxyUrl, bypassPolicy) {
     const redactedProxyUrl = redactProxyUrl(proxyUrl);
     return {
         active: true,
@@ -155,6 +161,14 @@ function createManagedProxyResolver(proxyUrl) {
                     url: formattedUrl,
                 };
             }
+            if (shouldBypassManagedProxy(bypassPolicy, url, surface)) {
+                return {
+                    kind: "direct",
+                    reason: "managed-proxy-bypass-policy",
+                    surface,
+                    url: formattedUrl,
+                };
+            }
             return {
                 kind: "proxied",
                 reason: "managed-proxy-active",
@@ -165,7 +179,10 @@ function createManagedProxyResolver(proxyUrl) {
         },
         getProxyForUrl: (url) => {
             const protocol = new URL(url).protocol;
-            return isProxyableUrlProtocol(protocol) ? proxyUrl.href : "";
+            return isProxyableUrlProtocol(protocol) &&
+                !shouldBypassManagedProxy(bypassPolicy, url, "unknown")
+                ? proxyUrl.href
+                : "";
         },
     };
 }
@@ -176,10 +193,78 @@ function createUndiciProxyDispatcher(options, proxyCa) {
         }
         return new AmbientUndiciDispatcher(options.env, proxyCa);
     }
-    return new UndiciProxyAgent({
-        uri: options.proxyUrl,
-        ...(proxyCa !== undefined ? { proxyTls: { ca: proxyCa } } : {}),
-    });
+    return new ManagedUndiciDispatcher(options.resolver, proxyCa);
+}
+class ManagedUndiciDispatcher extends Dispatcher {
+    #directDispatcher = new UndiciAgent();
+    #proxyCa;
+    #proxyDispatchers = new Map();
+    #resolver;
+    #closedError;
+    constructor(resolver, proxyCa) {
+        super();
+        this.#resolver = resolver;
+        this.#proxyCa = proxyCa;
+    }
+    dispatch(options, handler) {
+        if (this.#closedError !== undefined) {
+            if (handler.onError === undefined) {
+                throw this.#closedError;
+            }
+            handler.onError(this.#closedError);
+            return false;
+        }
+        const url = resolveUndiciDispatchUrl(options);
+        const proxyUrl = url === undefined ? "" : this.#resolver.getProxyForUrl(url);
+        const dispatcher = proxyUrl === "" ? this.#directDispatcher : this.#proxyDispatcher(proxyUrl);
+        return dispatcher.dispatch(options, handler);
+    }
+    close(callback) {
+        const closing = this.#closeAll();
+        if (callback === undefined) {
+            return closing;
+        }
+        closing.then(callback, callback);
+    }
+    destroy(errorOrCallback, callback) {
+        const error = typeof errorOrCallback === "function" ? null : errorOrCallback ?? null;
+        const destroyCallback = typeof errorOrCallback === "function" ? errorOrCallback : callback;
+        const destroying = this.#destroyAll(error);
+        if (destroyCallback === undefined) {
+            return destroying;
+        }
+        destroying.then(destroyCallback, destroyCallback);
+    }
+    #proxyDispatcher(proxyUrl) {
+        const existing = this.#proxyDispatchers.get(proxyUrl);
+        if (existing !== undefined) {
+            return existing;
+        }
+        const dispatcher = new UndiciProxyAgent({
+            uri: proxyUrl,
+            ...(this.#proxyCa !== undefined ? { proxyTls: { ca: this.#proxyCa } } : {}),
+        });
+        this.#proxyDispatchers.set(proxyUrl, dispatcher);
+        return dispatcher;
+    }
+    async #closeAll() {
+        this.#closedError ??= new undiciErrors.ClientClosedError();
+        const proxyDispatchers = [...this.#proxyDispatchers.values()];
+        this.#proxyDispatchers.clear();
+        await Promise.all([
+            this.#directDispatcher.close(),
+            ...proxyDispatchers.map((dispatcher) => dispatcher.close()),
+        ]);
+    }
+    async #destroyAll(error) {
+        this.#closedError ??= error ?? new undiciErrors.ClientDestroyedError();
+        const proxyDispatchers = [...this.#proxyDispatchers.values()];
+        this.#proxyDispatchers.clear();
+        await Promise.all([
+            this.#directDispatcher.destroy(error),
+            ...proxyDispatchers.map((dispatcher) => dispatcher.destroy(error)),
+        ]);
+    }
 }
 class AmbientUndiciDispatcher extends Dispatcher {
     #directDispatcher = new UndiciAgent();
@@ -359,13 +444,13 @@ export function installProxyline(options) {
     const proxyCa = resolveProxyTlsCa(options.proxyTls);
     const ambientEnv = proxyUrl === undefined ? readProxyEnv() : undefined;
     const resolver = proxyUrl !== undefined
-        ? createManagedProxyResolver(proxyUrl)
+        ? createManagedProxyResolver(proxyUrl, options.bypassPolicy)
         : createAmbientProxyResolver(ambientEnv ?? EMPTY_PROXY_ENV);
     const redactedProxyUrl = resolver.describeProxy();
     const hasActiveProxy = resolver.active;
     const runtime = hasActiveProxy
         ? installRuntime(resolver, proxyUrl !== undefined
-            ? { mode: "managed", proxyUrl: proxyUrl.href }
+            ? { mode: "managed", resolver }
             : { mode: "ambient", env: ambientEnv ?? EMPTY_PROXY_ENV, active: hasActiveProxy }, proxyCa)
         : undefined;
     emit(options.onEvent, {
@@ -387,7 +472,7 @@ export function installProxyline(options) {
         createUndiciDispatcher: () => stopped
             ? new UndiciAgent()
             : createUndiciProxyDispatcher(proxyUrl !== undefined
-                ? { mode: "managed", proxyUrl: proxyUrl.href }
+                ? { mode: "managed", resolver }
                 : { mode: "ambient", env: ambientEnv ?? EMPTY_PROXY_ENV, active: hasActiveProxy }, proxyCa),
         createWebSocketAgent: () => {
             if (!hasActiveProxy || stopped) {

@@ -7,6 +7,7 @@ export type ProxylineOptions = Readonly<{
     mode: ProxylineMode;
     proxyUrl?: string | URL;
     proxyTls?: ProxylineTlsOptions;
+    bypassPolicy?: ProxylineBypassPolicy;
     onEvent?: (event: ProxylineEvent) => void;
 }>;
 export type ProxylineDecision = Readonly<{
@@ -16,6 +17,11 @@ export type ProxylineDecision = Readonly<{
     url: string;
     proxyUrl?: string;
 }>;
+export type ProxylineBypassRequest = Readonly<{
+    surface: ProxylineSurface;
+    url: string;
+}>;
+export type ProxylineBypassPolicy = (request: ProxylineBypassRequest) => boolean;
 export type ProxylineEvent = Readonly<{
     type: "runtime.installed";
     mode: ProxylineMode;

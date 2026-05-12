@@ -96,6 +96,24 @@ test("managed mode explains unsupported URL schemes as direct", () => {
   }
 });
 
+test("managed mode explains bypass policy matches as direct", () => {
+  const proxy = installGlobalProxy({
+    mode: "managed",
+    proxyUrl: "https://proxy.example:8443",
+    bypassPolicy: ({ url }) => new URL(url).hostname === "gateway.localhost",
+  });
+
+  try {
+    const decision = proxy.explain("ws://gateway.localhost:18789/", { surface: "websocket" });
+
+    assert.equal(decision.kind, "direct");
+    assert.equal(decision.reason, "managed-proxy-bypass-policy");
+    assert.equal(decision.proxyUrl, undefined);
+  } finally {
+    proxy.stop();
+  }
+});
+
 test("ambient mode can be inactive and explain direct routing", () => {
   const proxy = installProxyline({ mode: "ambient" });
 
