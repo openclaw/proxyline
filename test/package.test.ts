@@ -124,6 +124,45 @@ test("package entrypoint global fetch keeps explicit dispatcher override behavio
   }
 });
 
+test("package entrypoint managed fetch ignores explicit dispatcher overrides", async () => {
+  const lab = await startProxyLab();
+  const proxy = installGlobalProxy({ mode: "managed", proxyUrl: lab.proxyUrl });
+  const directDispatcher = new UndiciAgent();
+  try {
+    const init = { dispatcher: directDispatcher };
+    const responseUnknown: unknown = await Reflect.apply(globalThis.fetch, globalThis, [
+      `${lab.targetUrl}/denied`,
+      init,
+    ]);
+    if (!(responseUnknown instanceof globalThis.Response)) {
+      throw new Error("global fetch returned a non-Response value");
+    }
+    const response = responseUnknown;
+
+    assert.equal(response.status, 403);
+    assert.match(await response.text(), /blocked by proxy lab/);
+    assert.notEqual(lab.events.length, 0);
+
+    lab.events.splice(0);
+    const requestUnknown: unknown = Reflect.construct(globalThis.Request, [
+      `${lab.targetUrl}/denied`,
+      { dispatcher: directDispatcher },
+    ]);
+    if (!(requestUnknown instanceof globalThis.Request)) {
+      throw new Error("failed to create Request");
+    }
+    const requestResponse = await globalThis.fetch(requestUnknown);
+
+    assert.equal(requestResponse.status, 403);
+    assert.match(await requestResponse.text(), /blocked by proxy lab/);
+    assert.notEqual(lab.events.length, 0);
+  } finally {
+    await directDispatcher.close();
+    proxy.stop();
+    await lab.close();
+  }
+});
+
 test("package entrypoint preserves standard options on preinstall Requests", async () => {
   const lab = await startProxyLab();
   const requestUnknown: unknown = Reflect.construct(globalThis.Request, [

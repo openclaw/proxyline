@@ -59,9 +59,11 @@ async function createProxylineRequestFromRequestLike(request, options) {
     if (request.referrerPolicy !== undefined) {
         init.referrerPolicy = request.referrerPolicy;
     }
-    const dispatcher = getRequestDispatcher(request);
-    if (dispatcher !== undefined) {
-        Reflect.set(init, "dispatcher", dispatcher);
+    if (options.preserveDispatcher) {
+        const dispatcher = getRequestDispatcher(request);
+        if (dispatcher !== undefined) {
+            Reflect.set(init, "dispatcher", dispatcher);
+        }
     }
     if (request.signal !== undefined) {
         init.signal = request.signal;
@@ -85,17 +87,32 @@ function requestInitOverridesBody(init) {
     }
     return Object.prototype.hasOwnProperty.call(init, "body");
 }
-async function normalizeFetchInput(input, init) {
-    if (input instanceof proxylineRequest || !isFetchRequestLike(input)) {
+async function normalizeFetchInput(input, init, options) {
+    if ((input instanceof proxylineRequest && options.preserveDispatcher) || !isFetchRequestLike(input)) {
         return input;
     }
     return await createProxylineRequestFromRequestLike(input, {
         includeBody: !requestInitOverridesBody(init),
+        preserveDispatcher: options.preserveDispatcher,
     });
 }
+function stripFetchDispatcher(init) {
+    if (typeof init !== "object" ||
+        init === null ||
+        !Object.prototype.hasOwnProperty.call(init, "dispatcher")) {
+        return init;
+    }
+    const sanitized = { ...init };
+    Reflect.deleteProperty(sanitized, "dispatcher");
+    return sanitized;
+}
 const proxylineFetch = async (input, init) => {
-    const normalizedInput = await normalizeFetchInput(input, init);
-    const response = await Reflect.apply(undiciFetch, undefined, init === undefined ? [normalizedInput] : [normalizedInput, init]);
+    const managedMode = activeRuntime?.mode === "managed";
+    const normalizedInput = await normalizeFetchInput(input, init, {
+        preserveDispatcher: !managedMode,
+    });
+    const normalizedInit = managedMode ? stripFetchDispatcher(init) : init;
+    const response = await Reflect.apply(undiciFetch, undefined, normalizedInit === undefined ? [normalizedInput] : [normalizedInput, normalizedInit]);
     if (!(response instanceof proxylineResponse)) {
         throw new TypeError("Proxyline fetch returned a non-Response value.");
     }
@@ -273,6 +290,7 @@ function installRuntime(resolver, dispatcherOptions, proxyCa) {
     const installedDispatcher = createUndiciProxyDispatcher(dispatcherOptions, proxyCa);
     const runtime = {
         installedDispatcher,
+        mode: dispatcherOptions.mode,
         nodeAgent,
         originalDispatcher,
         originalFetch,

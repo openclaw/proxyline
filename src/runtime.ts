@@ -42,6 +42,7 @@ import type {
 
 type RuntimeInstall = {
   installedDispatcher: Dispatcher;
+  mode: ProxylineOptions["mode"];
   nodeAgent: NodeProxyAgent;
   originalDispatcher: Dispatcher;
   originalFetch: typeof globalThis.fetch;
@@ -120,7 +121,7 @@ function isFetchRequestLike(value: unknown): value is FetchRequestLike {
 
 async function createProxylineRequestFromRequestLike(
   request: FetchRequestLike,
-  options: { includeBody: boolean },
+  options: { includeBody: boolean; preserveDispatcher: boolean },
 ): Promise<globalThis.Request> {
   const init: ProxylineRequestInit = {
     headers: request.headers,
@@ -150,9 +151,11 @@ async function createProxylineRequestFromRequestLike(
   if (request.referrerPolicy !== undefined) {
     init.referrerPolicy = request.referrerPolicy;
   }
-  const dispatcher = getRequestDispatcher(request);
-  if (dispatcher !== undefined) {
-    Reflect.set(init, "dispatcher", dispatcher);
+  if (options.preserveDispatcher) {
+    const dispatcher = getRequestDispatcher(request);
+    if (dispatcher !== undefined) {
+      Reflect.set(init, "dispatcher", dispatcher);
+    }
   }
   if (request.signal !== undefined) {
     init.signal = request.signal;
@@ -183,21 +186,42 @@ function requestInitOverridesBody(init: Parameters<typeof globalThis.fetch>[1]):
 async function normalizeFetchInput(
   input: Parameters<typeof globalThis.fetch>[0],
   init: Parameters<typeof globalThis.fetch>[1],
+  options: { preserveDispatcher: boolean },
 ): Promise<Parameters<typeof globalThis.fetch>[0]> {
-  if (input instanceof proxylineRequest || !isFetchRequestLike(input)) {
+  if ((input instanceof proxylineRequest && options.preserveDispatcher) || !isFetchRequestLike(input)) {
     return input;
   }
   return await createProxylineRequestFromRequestLike(input, {
     includeBody: !requestInitOverridesBody(init),
+    preserveDispatcher: options.preserveDispatcher,
   });
 }
 
+function stripFetchDispatcher(
+  init: Parameters<typeof globalThis.fetch>[1],
+): Parameters<typeof globalThis.fetch>[1] {
+  if (
+    typeof init !== "object" ||
+    init === null ||
+    !Object.prototype.hasOwnProperty.call(init, "dispatcher")
+  ) {
+    return init;
+  }
+  const sanitized = { ...init };
+  Reflect.deleteProperty(sanitized, "dispatcher");
+  return sanitized;
+}
+
 const proxylineFetch: typeof globalThis.fetch = async (input, init) => {
-  const normalizedInput = await normalizeFetchInput(input, init);
+  const managedMode = activeRuntime?.mode === "managed";
+  const normalizedInput = await normalizeFetchInput(input, init, {
+    preserveDispatcher: !managedMode,
+  });
+  const normalizedInit = managedMode ? stripFetchDispatcher(init) : init;
   const response: unknown = await Reflect.apply(
     undiciFetch,
     undefined,
-    init === undefined ? [normalizedInput] : [normalizedInput, init],
+    normalizedInit === undefined ? [normalizedInput] : [normalizedInput, normalizedInit],
   );
   if (!(response instanceof proxylineResponse)) {
     throw new TypeError("Proxyline fetch returned a non-Response value.");
@@ -418,6 +442,7 @@ function installRuntime(
   const installedDispatcher = createUndiciProxyDispatcher(dispatcherOptions, proxyCa);
   const runtime: RuntimeInstall = {
     installedDispatcher,
+    mode: dispatcherOptions.mode,
     nodeAgent,
     originalDispatcher,
     originalFetch,

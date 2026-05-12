@@ -57,7 +57,7 @@ if (!proxy.active) {
 | Forces traffic through proxy | yes | only when env says so |
 | Replaces caller-supplied agents | yes | yes (when active) |
 | Installs undici dispatcher | `ProxyAgent` | Proxyline ambient dispatcher |
-| `explain()` direct reason | never | `no-proxy-match` or `ambient-proxy-not-configured` |
+| `explain()` direct reason | `managed-proxy-unsupported-url-scheme` for unsupported schemes | `no-proxy-match` or `ambient-proxy-not-configured` |
 | Setup failure mode | throws | inactive but installed |
 
 ## Why a strict managed mode
