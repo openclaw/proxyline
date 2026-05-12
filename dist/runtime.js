@@ -85,7 +85,7 @@ function requestInitOverridesBody(init) {
     if (typeof init !== "object" || init === null) {
         return false;
     }
-    return Object.prototype.hasOwnProperty.call(init, "body");
+    return "body" in init;
 }
 async function normalizeFetchInput(input, init, options) {
     if ((input instanceof proxylineRequest && options.preserveDispatcher) || !isFetchRequestLike(input)) {
@@ -100,8 +100,13 @@ function stripFetchDispatcher(init) {
     if (typeof init !== "object" || init === null) {
         return init;
     }
-    const sanitized = { ...init };
-    Reflect.set(sanitized, "dispatcher", undefined);
+    const sanitized = Object.create(init);
+    Reflect.defineProperty(sanitized, "dispatcher", {
+        configurable: true,
+        enumerable: true,
+        value: undefined,
+        writable: true,
+    });
     return sanitized;
 }
 const proxylineFetch = async (input, init) => {

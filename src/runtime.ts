@@ -180,7 +180,7 @@ function requestInitOverridesBody(init: Parameters<typeof globalThis.fetch>[1]):
   if (typeof init !== "object" || init === null) {
     return false;
   }
-  return Object.prototype.hasOwnProperty.call(init, "body");
+  return "body" in init;
 }
 
 async function normalizeFetchInput(
@@ -203,8 +203,13 @@ function stripFetchDispatcher(
   if (typeof init !== "object" || init === null) {
     return init;
   }
-  const sanitized = { ...init };
-  Reflect.set(sanitized, "dispatcher", undefined);
+  const sanitized = Object.create(init);
+  Reflect.defineProperty(sanitized, "dispatcher", {
+    configurable: true,
+    enumerable: true,
+    value: undefined,
+    writable: true,
+  });
   return sanitized;
 }
 
