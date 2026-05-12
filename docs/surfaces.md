@@ -65,7 +65,7 @@ const socket = new WebSocket("wss://events.example.com/", {
 });
 ```
 
-When ambient mode is inactive, `createWebSocketAgent()` returns a plain `http.Agent`, so calling code does not need a conditional path.
+When ambient mode is inactive, `createWebSocketAgent()` returns a direct-routing agent, so calling code does not need a conditional path.
 
 Clients that do **not** expose an `agent` option but still route their handshake through `http.request` are covered automatically by the global patch.
 

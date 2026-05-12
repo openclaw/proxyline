@@ -16,7 +16,7 @@ Website: [proxyline.dev](https://proxyline.dev)
 
 - **Two modes.** `managed` forces traffic through a configured proxy and fails closed on bad config. `ambient` reads `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY` for tooling that needs environment compatibility.
 - **Covers the surfaces that matter.** `http.request`, `http.get`, `https.request`, `https.get`, both global agents, the undici global dispatcher, and helpers for WebSocket agents and HTTP CONNECT sockets.
-- **Replaces caller agents.** In managed mode, a per-request `http.Agent` passed by a library does not bypass the proxy. TLS options on the caller agent (`ca`, `cert`, `key`, `rejectUnauthorized`, …) are preserved so destination TLS still validates.
+- **Replaces caller agents.** In managed mode and active ambient mode, a per-request `http.Agent` passed by a library does not bypass the proxy. TLS options on the caller agent (`ca`, `cert`, `key`, `rejectUnauthorized`, …) are preserved so destination TLS still validates.
 - **Scoped proxy CA trust.** `proxyTls.ca` / `proxyTls.caFile` trust a private CA for the proxy endpoint only — no `NODE_EXTRA_CA_CERTS` and no `NODE_TLS_REJECT_UNAUTHORIZED=0`.
 - **Observable.** `proxy.explain(url)` returns a structured decision (`proxied` / `direct` with a `reason`), and an `onEvent` callback receives `runtime.installed`, `runtime.stopped`, and per-decision events. Proxy URLs are credential-redacted.
 - **Restoreable.** `proxy.stop()` restores the captured Node HTTP(S) methods, global agents, undici dispatcher, and fetch globals. The runtime is a process-wide singleton — a second install throws `RUNTIME_ALREADY_ACTIVE`.
