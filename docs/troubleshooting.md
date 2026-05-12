@@ -59,7 +59,7 @@ Each test should call `proxy.stop()` in its teardown. Without that, the next ins
 
 ## Ambient mode reports `active: false`
 
-No proxy variables are set. Check `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` (and their lowercase forms). `NO_PROXY` alone is not enough to activate the runtime. See [Environment Variables](./environment-variables.md).
+No supported proxy variables are set. Check `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` (and their lowercase forms), and make sure their values use `http://` or `https://`. `NO_PROXY` alone is not enough to activate the runtime. See [Environment Variables](./environment-variables.md).
 
 ## `NO_PROXY` is not matching as expected
 

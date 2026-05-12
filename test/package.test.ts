@@ -176,3 +176,40 @@ test("package entrypoint lets fetch init body replace a consumed preinstall Requ
     await lab.close();
   }
 });
+
+test("package entrypoint streams preinstall Request bodies without buffering first", async () => {
+  const lab = await startProxyLab();
+  const encoder = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode("streamed"));
+      controller.close();
+    },
+  });
+  const requestUnknown: unknown = Reflect.construct(globalThis.Request, [
+    `${lab.targetUrl}/echo`,
+    { body, duplex: "half", method: "POST" },
+  ]);
+  if (!(requestUnknown instanceof globalThis.Request)) {
+    throw new Error("failed to create preinstall Request");
+  }
+  const request = requestUnknown;
+  Object.defineProperty(request, "arrayBuffer", {
+    value: () => {
+      throw new Error("preinstall Request body was buffered");
+    },
+  });
+  const proxy = withProxyEnv(
+    { HTTP_PROXY: lab.proxyUrl },
+    () => installGlobalProxy({ mode: "ambient" }),
+  );
+  try {
+    const response = await globalThis.fetch(request);
+
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), "streamed");
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});

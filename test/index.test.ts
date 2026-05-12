@@ -79,6 +79,23 @@ test("managed mode explains proxied decisions without leaking credentials", () =
   }
 });
 
+test("managed mode explains unsupported URL schemes as direct", () => {
+  const proxy = installGlobalProxy({
+    mode: "managed",
+    proxyUrl: "https://proxy.example:8443",
+  });
+
+  try {
+    const decision = proxy.explain("ftp://api.example.com/resource", { surface: "unknown" });
+
+    assert.equal(decision.kind, "direct");
+    assert.equal(decision.reason, "managed-proxy-unsupported-url-scheme");
+    assert.equal(decision.proxyUrl, undefined);
+  } finally {
+    proxy.stop();
+  }
+});
+
 test("ambient mode can be inactive and explain direct routing", () => {
   const proxy = installProxyline({ mode: "ambient" });
 

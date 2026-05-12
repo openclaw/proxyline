@@ -125,6 +125,7 @@ type ProxylineDecision = Readonly<{
 Known `reason` values:
 
 - `"managed-proxy-active"` — managed mode applied.
+- `"managed-proxy-unsupported-url-scheme"` — managed mode is active, but the URL scheme is not one Proxyline can proxy.
 - `"ambient-proxy-active"` — ambient mode resolved a proxy from env.
 - `"ambient-proxy-not-configured"` — ambient mode has no proxy env set, or the URL scheme is unsupported.
 - `"no-proxy-match"` — the URL matched `NO_PROXY`.

@@ -8,11 +8,11 @@ Managed mode treats proxy routing as a security policy.
 
 - `proxyUrl` is **required**. Omitting it throws `ProxylineError` with code `MANAGED_PROXY_URL_REQUIRED`.
 - Only `http://` and `https://` proxy endpoints are accepted. Other schemes throw `UNSUPPORTED_PROXY_PROTOCOL`.
-- The managed proxy is forced for every request on the patched surfaces.
+- The managed proxy is forced for HTTP(S) and WS(S) requests on the patched surfaces.
 - Caller-supplied `http.Agent` or `https.Agent` values are replaced per request. TLS-relevant agent options (`ca`, `cert`, `key`, `ciphers`, `minVersion`, `maxVersion`, `rejectUnauthorized`, etc.) are copied onto the proxy request so destination TLS identity is preserved. See [Surfaces — TLS identity preservation](./surfaces.md#tls-identity-preservation) for the full list.
 - The undici global dispatcher is replaced with an `undici.ProxyAgent` pointed at `proxyUrl`.
 - Environment variables (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, ...) are **ignored**.
-- `explain()` returns `kind: "proxied"` with `reason: "managed-proxy-active"` for every URL.
+- `explain()` returns `kind: "proxied"` with `reason: "managed-proxy-active"` for supported URL schemes. Unsupported schemes return `kind: "direct"` with `reason: "managed-proxy-unsupported-url-scheme"` because Proxyline has no safe proxy mapping for them.
 
 Use managed mode when "go direct" must never be silent. If your network policy demands traffic egress through a specific gateway, this is the posture you want.
 

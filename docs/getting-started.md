@@ -60,7 +60,7 @@ export NO_PROXY="metadata.google.internal,127.0.0.1"
 import { installGlobalProxy } from "@openclaw/proxyline";
 
 const proxy = installGlobalProxy({ mode: "ambient" });
-console.log(proxy.active);            // true if any HTTP_PROXY/HTTPS_PROXY/ALL_PROXY is set
+console.log(proxy.active);            // true if a supported HTTP_PROXY/HTTPS_PROXY/ALL_PROXY is set
 console.log(proxy.proxyUrl);          // redacted URL string when active
 ```
 

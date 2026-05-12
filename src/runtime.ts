@@ -62,7 +62,7 @@ const proxylineResponse = UndiciResponse as unknown as typeof globalThis.Respons
 const proxylineFormData = UndiciFormData as unknown as typeof globalThis.FormData;
 
 type ProxylineRequestInit = {
-  body?: ArrayBuffer;
+  body?: unknown;
   cache?: unknown;
   credentials?: unknown;
   dispatcher?: unknown;
@@ -163,7 +163,7 @@ async function createProxylineRequestFromRequestLike(
     request.method !== "GET" &&
     request.method !== "HEAD"
   ) {
-    init.body = await request.arrayBuffer();
+    init.body = request.body;
     init.duplex = "half";
   }
   const requestUnknown: unknown = Reflect.construct(proxylineRequest, [request.url, init]);
@@ -223,26 +223,39 @@ function emit(onEvent: ProxylineOptions["onEvent"], event: ProxylineEvent): void
   onEvent?.(event);
 }
 
+function isProxyableUrlProtocol(protocol: string): boolean {
+  return protocol === "http:" ||
+    protocol === "https:" ||
+    protocol === "ws:" ||
+    protocol === "wss:";
+}
+
 function createManagedProxyResolver(proxyUrl: URL): ProxyResolver {
   const redactedProxyUrl = redactProxyUrl(proxyUrl);
   return {
     active: true,
     describeProxy: () => redactedProxyUrl,
-    explain: (url, surface) => ({
-      kind: "proxied",
-      reason: "managed-proxy-active",
-      surface,
-      url: formatUrl(url),
-      proxyUrl: redactedProxyUrl,
-    }),
+    explain: (url, surface) => {
+      const formattedUrl = formatUrl(url);
+      if (!isProxyableUrlProtocol(new URL(url).protocol)) {
+        return {
+          kind: "direct",
+          reason: "managed-proxy-unsupported-url-scheme",
+          surface,
+          url: formattedUrl,
+        };
+      }
+      return {
+        kind: "proxied",
+        reason: "managed-proxy-active",
+        surface,
+        url: formattedUrl,
+        proxyUrl: redactedProxyUrl,
+      };
+    },
     getProxyForUrl: (url) => {
       const protocol = new URL(url).protocol;
-      return protocol === "http:" ||
-        protocol === "https:" ||
-        protocol === "ws:" ||
-        protocol === "wss:"
-        ? proxyUrl.href
-        : "";
+      return isProxyableUrlProtocol(protocol) ? proxyUrl.href : "";
     },
   };
 }
