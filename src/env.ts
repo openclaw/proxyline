@@ -174,6 +174,10 @@ function proxyEnvKeyForProtocol(protocol: string): LowerProxyEnvKey | undefined 
   return undefined;
 }
 
+function supportsProxyForUrlProtocol(protocol: string): boolean {
+  return protocol === "http:" || protocol === "https:" || protocol === "ws:" || protocol === "wss:";
+}
+
 function resolveAmbientProxyEnvValue(
   env: ProxyEnvSnapshot,
   key: LowerProxyEnvKey,
@@ -192,12 +196,7 @@ export function resolveAmbientProxyForUrl(
     return undefined;
   }
   const protocol = parsedUrl.protocol;
-  if (
-    protocol !== "http:" &&
-    protocol !== "https:" &&
-    protocol !== "ws:" &&
-    protocol !== "wss:"
-  ) {
+  if (!supportsProxyForUrlProtocol(protocol)) {
     return undefined;
   }
   if (matchesNoProxy(parsedUrl, env)) {
@@ -226,6 +225,7 @@ export function createAmbientProxyResolver(env: ProxyEnvSnapshot): ProxyResolver
         : undefined,
     explain: (url, surface) => {
       const formattedUrl = formatUrl(url);
+      const parsedUrl = new URL(formattedUrl);
       const proxyUrl = resolveAmbientProxyForUrl(formattedUrl, env);
       if (proxyUrl !== undefined) {
         return {
@@ -238,7 +238,7 @@ export function createAmbientProxyResolver(env: ProxyEnvSnapshot): ProxyResolver
       }
       return {
         kind: "direct",
-        reason: matchesNoProxy(new URL(formattedUrl), env)
+        reason: supportsProxyForUrlProtocol(parsedUrl.protocol) && matchesNoProxy(parsedUrl, env)
           ? "no-proxy-match"
           : "ambient-proxy-not-configured",
         surface,

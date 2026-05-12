@@ -152,6 +152,21 @@ test("ambient mode falls back to ALL_PROXY when protocol proxy scheme is unsuppo
   }
 });
 
+test("ambient mode explains unsupported URL schemes as not configured", () => {
+  const proxy = withProxyEnv(
+    { HTTP_PROXY: "http://proxy.example:8080", NO_PROXY: "corp.example" },
+    () => installProxyline({ mode: "ambient" }),
+  );
+  try {
+    const decision = proxy.explain("ftp://corp.example/resource");
+
+    assert.equal(decision.kind, "direct");
+    assert.equal(decision.reason, "ambient-proxy-not-configured");
+  } finally {
+    proxy.stop();
+  }
+});
+
 test("ambient mode suffix no-proxy entries also match the root host", () => {
   for (const noProxy of [".corp.example", "*.corp.example"]) {
     const proxy = withProxyEnv(

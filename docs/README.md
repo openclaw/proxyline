@@ -27,10 +27,10 @@ Process-global proxy routing for Node.js. Proxyline patches the network surfaces
 | --- | --- | --- |
 | `http.request` / `http.get` | yes | global method patch + global agent swap |
 | `https.request` / `https.get` | yes | global method patch + global agent swap |
-| `fetch` / undici global dispatcher | yes | `setGlobalDispatcher` |
+| `fetch` / undici global dispatcher | yes | `globalThis.fetch` patch + `setGlobalDispatcher` |
 | WebSocket clients accepting a Node `agent` | yes | `proxy.createWebSocketAgent()` |
 | WebSocket clients without an `agent` option | partial | upgrade reuses patched `http.request` |
 | Explicit HTTP CONNECT socket | yes | `openProxyConnectTunnel()` |
-| Caller-built `http.Agent` / `https.Agent` | overridden in managed mode | per-request agent replacement |
+| Caller-built `http.Agent` / `https.Agent` | overridden in managed and active ambient mode | per-request agent replacement |
 | Raw `net.connect` / `tls.connect` | no | out of scope — see [Security](./security.md) |
 | Native or third-party transport stacks | no | out of scope — see [Security](./security.md) |

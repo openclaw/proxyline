@@ -34,12 +34,12 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "check": "pnpm typecheck && pnpm test && pnpm build",
+    "check": "pnpm typecheck && pnpm test",
     "docs:build": "node scripts/build-docs-site.mjs",
     "package:dry-run": "pnpm pack --dry-run",
     "prepack": "node scripts/prepack-build.mjs",
     "publish:dry-run": "pnpm publish --dry-run --access public",
-    "test": "tsx --test test/index.test.ts test/e2e.test.ts",
+    "test": "pnpm build && tsx --test test/index.test.ts test/e2e.test.ts test/package.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
