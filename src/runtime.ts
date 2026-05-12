@@ -61,16 +61,37 @@ const proxylineRequest = UndiciRequest as unknown as typeof globalThis.Request;
 const proxylineResponse = UndiciResponse as unknown as typeof globalThis.Response;
 const proxylineFormData = UndiciFormData as unknown as typeof globalThis.FormData;
 
-type ProxylineRequestInit = RequestInit & {
+type ProxylineRequestInit = {
+  body?: ArrayBuffer;
+  cache?: unknown;
+  credentials?: unknown;
   dispatcher?: unknown;
+  duplex?: "half";
+  headers?: unknown;
+  integrity?: unknown;
+  keepalive?: unknown;
+  method?: string;
+  mode?: unknown;
+  redirect?: unknown;
+  referrer?: unknown;
+  referrerPolicy?: unknown;
+  signal?: unknown;
 };
 
 type FetchRequestLike = Readonly<{
   arrayBuffer: () => Promise<ArrayBuffer>;
   body: ReadableStream<Uint8Array> | null;
+  cache?: unknown;
+  credentials?: unknown;
   headers: InstanceType<typeof globalThis.Headers>;
+  integrity?: unknown;
+  keepalive?: unknown;
   method: string;
-  signal?: AbortSignal;
+  mode?: unknown;
+  redirect?: unknown;
+  referrer?: unknown;
+  referrerPolicy?: unknown;
+  signal?: unknown;
   url: string;
 }>;
 
@@ -104,6 +125,30 @@ async function createProxylineRequestFromRequestLike(
     headers: request.headers,
     method: request.method,
   };
+  if (request.cache !== undefined) {
+    init.cache = request.cache;
+  }
+  if (request.credentials !== undefined) {
+    init.credentials = request.credentials;
+  }
+  if (request.integrity !== undefined) {
+    init.integrity = request.integrity;
+  }
+  if (request.keepalive !== undefined) {
+    init.keepalive = request.keepalive;
+  }
+  if (request.mode !== undefined) {
+    init.mode = request.mode;
+  }
+  if (request.redirect !== undefined) {
+    init.redirect = request.redirect;
+  }
+  if (request.referrer !== undefined) {
+    init.referrer = request.referrer;
+  }
+  if (request.referrerPolicy !== undefined) {
+    init.referrerPolicy = request.referrerPolicy;
+  }
   const dispatcher = getRequestDispatcher(request);
   if (dispatcher !== undefined) {
     Reflect.set(init, "dispatcher", dispatcher);

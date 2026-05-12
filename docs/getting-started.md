@@ -1,6 +1,6 @@
 # Getting Started
 
-Proxyline targets Node.js 20+. It is published as `@openclaw/proxyline` and ships ESM with TypeScript types.
+Proxyline targets Node.js 20.18.1+. It is published as `@openclaw/proxyline` and ships ESM with TypeScript types.
 
 ## Install
 
@@ -14,7 +14,7 @@ yarn add @openclaw/proxyline
 
 ## Install Proxyline first
 
-Patches replace `http.request`, `http.get`, `https.request`, `https.get`, `http.globalAgent`, `https.globalAgent`, and the undici global dispatcher. Any module that captured the original references before Proxyline installs will bypass the runtime. Initialize Proxyline before importing third-party HTTP clients when proxy routing is a security policy.
+Patches replace `http.request`, `http.get`, `https.request`, `https.get`, `http.globalAgent`, `https.globalAgent`, the undici global dispatcher, and the fetch globals. Any module that captured the original references before Proxyline installs will bypass the runtime. Initialize Proxyline before importing third-party HTTP clients when proxy routing is a security policy.
 
 ```ts
 // entry.ts — first import in your application
@@ -68,7 +68,7 @@ See [Modes](./modes.md) for the full posture contract and [Environment Variables
 
 ## Shutdown
 
-Call `proxy.stop()` from your shutdown path (and from tests). It restores the saved Node HTTP(S) methods and global agents, restores the previous undici global dispatcher, and destroys the internal proxy agent. Only one Proxyline runtime can be active at a time; install will throw `RUNTIME_ALREADY_ACTIVE` otherwise.
+Call `proxy.stop()` from your shutdown path (and from tests). It restores the saved Node HTTP(S) methods and global agents, restores the previous undici global dispatcher and fetch globals, and destroys the internal proxy agent. Only one Proxyline runtime can be active at a time; install will throw `RUNTIME_ALREADY_ACTIVE` otherwise.
 
 ```ts
 process.once("SIGTERM", () => proxy.stop());

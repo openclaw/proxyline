@@ -124,6 +124,11 @@ export async function startProxyLab(options: ProxyLabOptions = {}): Promise<Prox
       res.end("target denied endpoint reached unexpectedly\n");
       return;
     }
+    if (req.url === "/redirect") {
+      res.writeHead(302, { location: "/allowed" });
+      res.end();
+      return;
+    }
     res.writeHead(200, { "content-type": "text/plain" });
     res.end("target default\n");
   };

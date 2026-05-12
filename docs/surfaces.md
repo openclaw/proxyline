@@ -41,7 +41,7 @@ Some HTTP clients build absolute-form requests themselves (e.g. `path: "https://
 - `undici.ProxyAgent` in managed mode, pointed at `proxyUrl` and trusting `proxyTls` when supplied.
 - Proxyline's ambient dispatcher in ambient mode, resolving each request against the current install-time `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` snapshot, with the same `proxyTls`.
 
-The original dispatcher and `globalThis.fetch` are captured and restored on `stop()`.
+The original dispatcher and fetch globals are captured and restored on `stop()`.
 
 ```ts
 import { fetch } from "undici";
@@ -50,6 +50,8 @@ await fetch("https://api.example.com/health"); // routed through Proxyline
 ```
 
 If your code creates its own undici `Agent` or `Dispatcher` and passes it explicitly to `fetch`, that explicit instance wins. Use `proxy.createUndiciDispatcher()` to get a dispatcher pre-wired to the same policy.
+
+Proxyline also replaces `globalThis.Request`, `Response`, `Headers`, and `FormData` with versions from its undici dependency so `globalThis.fetch` receives compatible objects on Node versions where the built-in fetch no longer shares the package dispatcher. Requests created before Proxyline installs are normalized through the standard public `Request` fields. Install Proxyline first if you need non-standard Request internals, such as a dispatcher embedded in a pre-install native `Request`, to be preserved.
 
 ## WebSocket
 

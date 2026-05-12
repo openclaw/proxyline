@@ -35,6 +35,30 @@ async function createProxylineRequestFromRequestLike(request) {
         headers: request.headers,
         method: request.method,
     };
+    if (request.cache !== undefined) {
+        init.cache = request.cache;
+    }
+    if (request.credentials !== undefined) {
+        init.credentials = request.credentials;
+    }
+    if (request.integrity !== undefined) {
+        init.integrity = request.integrity;
+    }
+    if (request.keepalive !== undefined) {
+        init.keepalive = request.keepalive;
+    }
+    if (request.mode !== undefined) {
+        init.mode = request.mode;
+    }
+    if (request.redirect !== undefined) {
+        init.redirect = request.redirect;
+    }
+    if (request.referrer !== undefined) {
+        init.referrer = request.referrer;
+    }
+    if (request.referrerPolicy !== undefined) {
+        init.referrerPolicy = request.referrerPolicy;
+    }
     const dispatcher = getRequestDispatcher(request);
     if (dispatcher !== undefined) {
         Reflect.set(init, "dispatcher", dispatcher);

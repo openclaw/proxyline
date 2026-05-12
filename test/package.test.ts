@@ -124,12 +124,11 @@ test("package entrypoint global fetch keeps explicit dispatcher override behavio
   }
 });
 
-test("package entrypoint preserves explicit dispatchers on preinstall Requests", async () => {
+test("package entrypoint preserves standard options on preinstall Requests", async () => {
   const lab = await startProxyLab();
-  const directDispatcher = new UndiciAgent();
   const requestUnknown: unknown = Reflect.construct(globalThis.Request, [
-    `${lab.targetUrl}/denied`,
-    { dispatcher: directDispatcher },
+    `${lab.targetUrl}/redirect`,
+    { redirect: "manual" },
   ]);
   if (!(requestUnknown instanceof globalThis.Request)) {
     throw new Error("failed to create preinstall Request");
@@ -142,12 +141,12 @@ test("package entrypoint preserves explicit dispatchers on preinstall Requests",
   try {
     const response = await globalThis.fetch(request);
 
-    assert.equal(response.status, 200);
-    assert.equal(await response.text(), "target denied endpoint reached unexpectedly\n");
-    assert.equal(lab.events.length, 0);
+    assert.equal(response.status, 302);
+    assert.equal(response.headers.get("location"), "/allowed");
+    await response.text();
+    assert.notEqual(lab.events.length, 0);
   } finally {
     proxy.stop();
-    await directDispatcher.close();
     await lab.close();
   }
 });

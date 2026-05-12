@@ -15,10 +15,10 @@ Aliased as `installGlobalProxy`. Installs the runtime and returns a handle.
 In managed mode (and active ambient mode), `installProxyline`:
 
 - Captures originals for `http.request`, `http.get`, `http.globalAgent`, `https.request`, `https.get`, `https.globalAgent`.
-- Captures the current undici global dispatcher and `globalThis.fetch`.
+- Captures the current undici global dispatcher and fetch globals.
 - Installs patched `http.request`/`get`, `https.request`/`get`.
 - Replaces `http.globalAgent` and `https.globalAgent` with a `proxy-agent` `ProxyAgent`.
-- Calls `undici.setGlobalDispatcher` with a `ProxyAgent` (managed) or Proxyline's ambient dispatcher (ambient), and patches `globalThis.fetch` to use that dispatcher.
+- Calls `undici.setGlobalDispatcher` with a `ProxyAgent` (managed) or Proxyline's ambient dispatcher (ambient), and patches `globalThis.fetch` plus `Request`, `Response`, `Headers`, and `FormData` to use that dispatcher-compatible fetch stack.
 - Emits `runtime.installed`.
 
 In inactive ambient mode (no supported proxy env variables), no patches are installed; the handle returns a passive observer with `active: false`.
@@ -174,7 +174,7 @@ type ProxylineHandle = Readonly<{
 - `createUndiciDispatcher()` — proxy-aware undici `Dispatcher`. Returns a direct `UndiciAgent()` when ambient-inactive or after `stop()`.
 - `createWebSocketAgent()` — same as `createNodeAgent()` but typed for WebSocket clients.
 - `explain(url, options?)` — returns a `ProxylineDecision` and emits a `decision` event.
-- `stop()` — restores the captured Node HTTP(S) stack, undici dispatcher, and `globalThis.fetch`, destroys Proxyline-owned runtime agents/dispatchers, emits `runtime.stopped`. Idempotent.
+- `stop()` — restores the captured Node HTTP(S) stack, undici dispatcher, and fetch globals, destroys Proxyline-owned runtime agents/dispatchers, emits `runtime.stopped`. Idempotent.
 
 ### `OpenProxyConnectTunnelOptions`
 

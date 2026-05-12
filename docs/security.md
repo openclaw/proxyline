@@ -32,6 +32,7 @@ Anything that does not flow through the patched APIs:
 - DNS resolution itself. Proxyline tells the proxy a hostname; DNS-based exfiltration via the local resolver is out of scope.
 - Sockets opened **before** `installProxyline` ran. Existing keepalive connections continue to use whatever transport they were created with.
 - Module references captured before `installProxyline` ran. Anything that stored `http.request` in a local variable at import time keeps the un-patched reference.
+- Non-standard internals on native `Request` objects created before `installProxyline` ran. Proxyline can normalize standard Request fields, but runtimes do not expose every internal field consistently.
 
 For a process-wide proxy enforcement policy, combine Proxyline with operating-system level controls (egress firewall rules, network namespaces, seccomp, or a sidecar proxy).
 

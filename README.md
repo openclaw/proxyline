@@ -29,7 +29,7 @@ pnpm add @openclaw/proxyline
 npm install @openclaw/proxyline
 ```
 
-Requires Node 20+.
+Requires Node 20.18.1+.
 
 ## Quick start
 
