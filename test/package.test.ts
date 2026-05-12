@@ -43,6 +43,7 @@ test("package entrypoint patches and restores fetch globals together", async () 
   const originalHeaders = globalThis.Headers;
   const originalRequest = globalThis.Request;
   const originalResponse = globalThis.Response;
+  const preInstallRequest = new originalRequest("data:text/plain,preinstall");
   const proxy = withProxyEnv(
     { HTTP_PROXY: "http://127.0.0.1:9" },
     () => installGlobalProxy({ mode: "ambient" }),
@@ -55,10 +56,14 @@ test("package entrypoint patches and restores fetch globals together", async () 
 
     const request = new globalThis.Request("data:text/plain,ok");
     const response = await globalThis.fetch(request);
+    const preInstallResponse = await globalThis.fetch(preInstallRequest);
 
     assert.ok(response instanceof globalThis.Response);
     assert.ok(response.headers instanceof globalThis.Headers);
     assert.equal(await response.text(), "ok");
+    assert.ok(preInstallResponse instanceof globalThis.Response);
+    assert.ok(preInstallResponse.headers instanceof globalThis.Headers);
+    assert.equal(await preInstallResponse.text(), "preinstall");
   } finally {
     proxy.stop();
   }

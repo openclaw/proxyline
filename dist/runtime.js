@@ -7,10 +7,47 @@ import { formatUrl, ProxylineError, redactProxyUrl, resolveProxyTlsCa, } from ".
 let activeRuntime;
 // Node's global fetch types come from bundled undici-types, while the runtime
 // implementation intentionally delegates to this package's undici dependency.
-const proxylineFetch = undiciFetch;
 const proxylineHeaders = UndiciHeaders;
 const proxylineRequest = UndiciRequest;
 const proxylineResponse = UndiciResponse;
+function isFetchRequestLike(value) {
+    if (typeof value !== "object" || value === null) {
+        return false;
+    }
+    const record = value;
+    return (typeof record.url === "string" &&
+        typeof record.method === "string" &&
+        typeof record.arrayBuffer === "function" &&
+        record.headers !== undefined);
+}
+async function createProxylineRequestFromRequestLike(request) {
+    const init = {
+        headers: request.headers,
+        method: request.method,
+    };
+    if (request.signal !== undefined) {
+        init.signal = request.signal;
+    }
+    if (request.body !== null && request.method !== "GET" && request.method !== "HEAD") {
+        init.body = await request.arrayBuffer();
+        init.duplex = "half";
+    }
+    return new proxylineRequest(request.url, init);
+}
+async function normalizeFetchInput(input) {
+    if (input instanceof proxylineRequest || !isFetchRequestLike(input)) {
+        return input;
+    }
+    return await createProxylineRequestFromRequestLike(input);
+}
+const proxylineFetch = async (input, init) => {
+    const normalizedInput = await normalizeFetchInput(input);
+    const response = await Reflect.apply(undiciFetch, undefined, init === undefined ? [normalizedInput] : [normalizedInput, init]);
+    if (!(response instanceof proxylineResponse)) {
+        throw new TypeError("Proxyline fetch returned a non-Response value.");
+    }
+    return response;
+};
 function normalizeProxyUrl(value) {
     if (value === undefined) {
         return undefined;

@@ -54,10 +54,70 @@ let activeRuntime: RuntimeInstall | undefined;
 
 // Node's global fetch types come from bundled undici-types, while the runtime
 // implementation intentionally delegates to this package's undici dependency.
-const proxylineFetch = undiciFetch as unknown as typeof globalThis.fetch;
 const proxylineHeaders = UndiciHeaders as unknown as typeof globalThis.Headers;
 const proxylineRequest = UndiciRequest as unknown as typeof globalThis.Request;
 const proxylineResponse = UndiciResponse as unknown as typeof globalThis.Response;
+
+type FetchRequestLike = Readonly<{
+  arrayBuffer: () => Promise<ArrayBuffer>;
+  body: ReadableStream<Uint8Array> | null;
+  headers: InstanceType<typeof globalThis.Headers>;
+  method: string;
+  signal?: AbortSignal;
+  url: string;
+}>;
+
+function isFetchRequestLike(value: unknown): value is FetchRequestLike {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const record = value as Readonly<Record<string, unknown>>;
+  return (
+    typeof record.url === "string" &&
+    typeof record.method === "string" &&
+    typeof record.arrayBuffer === "function" &&
+    record.headers !== undefined
+  );
+}
+
+async function createProxylineRequestFromRequestLike(
+  request: FetchRequestLike,
+): Promise<globalThis.Request> {
+  const init: RequestInit = {
+    headers: request.headers,
+    method: request.method,
+  };
+  if (request.signal !== undefined) {
+    init.signal = request.signal;
+  }
+  if (request.body !== null && request.method !== "GET" && request.method !== "HEAD") {
+    init.body = await request.arrayBuffer();
+    init.duplex = "half";
+  }
+  return new proxylineRequest(request.url, init);
+}
+
+async function normalizeFetchInput(
+  input: Parameters<typeof globalThis.fetch>[0],
+): Promise<Parameters<typeof globalThis.fetch>[0]> {
+  if (input instanceof proxylineRequest || !isFetchRequestLike(input)) {
+    return input;
+  }
+  return await createProxylineRequestFromRequestLike(input);
+}
+
+const proxylineFetch: typeof globalThis.fetch = async (input, init) => {
+  const normalizedInput = await normalizeFetchInput(input);
+  const response: unknown = await Reflect.apply(
+    undiciFetch,
+    undefined,
+    init === undefined ? [normalizedInput] : [normalizedInput, init],
+  );
+  if (!(response instanceof proxylineResponse)) {
+    throw new TypeError("Proxyline fetch returned a non-Response value.");
+  }
+  return response;
+};
 
 function normalizeProxyUrl(value: string | URL | undefined): URL | undefined {
   if (value === undefined) {
