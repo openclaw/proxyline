@@ -5,7 +5,7 @@ import https from "node:https";
 import { type AddressInfo } from "node:net";
 import { URL } from "node:url";
 import test from "node:test";
-import { fetch } from "undici";
+import { Dispatcher, fetch } from "undici";
 import WebSocket from "ws";
 import { createWebSocketServer } from "./support/ws-server.js";
 import { installGlobalProxy, openProxyConnectTunnel } from "../src/index.js";
@@ -339,6 +339,52 @@ test("ambient mode routes undici HTTPS fetch through ALL_PROXY fallback", async 
       ),
     );
   } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
+test("ambient mode resolves low-level undici absolute-form paths from origin", async () => {
+  const lab = await startProxyLab();
+  const proxy = withProxyEnv(
+    { HTTP_PROXY: lab.proxyUrl, NO_PROXY: "no-proxy.example" },
+    () => installGlobalProxy({ mode: "ambient" }),
+  );
+  const dispatcher = proxy.createUndiciDispatcher();
+  try {
+    const result = await new Promise<{ body: string; statusCode: number }>((resolve, reject) => {
+      let body = "";
+      let responseStatusCode = 0;
+      dispatcher.dispatch(
+        {
+          method: "GET",
+          origin: lab.targetUrl,
+          path: "http://no-proxy.example/denied",
+        },
+        {
+          onData(chunk: Buffer): boolean {
+            body += chunk.toString("utf8");
+            return true;
+          },
+          onComplete() {
+            resolve({ body, statusCode: responseStatusCode });
+          },
+          onConnect() {},
+          onError: reject,
+          onHeaders(statusCode: number, _headers: Buffer[], resume: () => void): boolean {
+            responseStatusCode = statusCode;
+            resume();
+            return true;
+          },
+        } satisfies Dispatcher.DispatchHandler,
+      );
+    });
+
+    assert.equal(result.statusCode, 403);
+    assert.match(result.body, /blocked by proxy lab/);
+    assert.notEqual(lab.events.length, 0);
+  } finally {
+    await dispatcher.close();
     proxy.stop();
     await lab.close();
   }

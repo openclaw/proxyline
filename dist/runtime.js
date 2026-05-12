@@ -254,7 +254,9 @@ class AmbientUndiciDispatcher extends Dispatcher {
 }
 function resolveUndiciDispatchUrl(options) {
     if (options.origin !== undefined) {
-        return new URL(options.path, options.origin).href;
+        const origin = options.origin.toString().replace(/\/$/, "");
+        const path = options.path.startsWith("/") ? options.path : `/${options.path}`;
+        return new URL(`${origin}${path}`).href;
     }
     try {
         return new URL(options.path).href;
