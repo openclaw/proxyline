@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.1 - Unreleased
+## 0.1.1 - 2026-05-12
 
 - Hardened ambient proxy routing, CONNECT target validation, undici dispatcher cleanup, and generated package output after the runtime module split.
 
