@@ -34,10 +34,12 @@ import {
   resolveProxyTlsCa,
 } from "./shared.js";
 import type {
+  ProxylineBypassPolicy,
   ProxylineEvent,
   ProxylineHandle,
   ProxylineOptions,
   ProxyResolver,
+  ProxylineSurface,
 } from "./types.js";
 
 type RuntimeInstall = {
@@ -255,7 +257,21 @@ function isProxyableUrlProtocol(protocol: string): boolean {
     protocol === "wss:";
 }
 
-function createManagedProxyResolver(proxyUrl: URL): ProxyResolver {
+function shouldBypassManagedProxy(
+  bypassPolicy: ProxylineBypassPolicy | undefined,
+  url: string | URL,
+  surface: ProxylineSurface,
+): boolean {
+  if (bypassPolicy === undefined) {
+    return false;
+  }
+  return bypassPolicy({ surface, url: formatUrl(url) });
+}
+
+function createManagedProxyResolver(
+  proxyUrl: URL,
+  bypassPolicy: ProxylineBypassPolicy | undefined,
+): ProxyResolver {
   const redactedProxyUrl = redactProxyUrl(proxyUrl);
   return {
     active: true,
@@ -270,6 +286,14 @@ function createManagedProxyResolver(proxyUrl: URL): ProxyResolver {
           url: formattedUrl,
         };
       }
+      if (shouldBypassManagedProxy(bypassPolicy, url, surface)) {
+        return {
+          kind: "direct",
+          reason: "managed-proxy-bypass-policy",
+          surface,
+          url: formattedUrl,
+        };
+      }
       return {
         kind: "proxied",
         reason: "managed-proxy-active",
@@ -280,14 +304,17 @@ function createManagedProxyResolver(proxyUrl: URL): ProxyResolver {
     },
     getProxyForUrl: (url) => {
       const protocol = new URL(url).protocol;
-      return isProxyableUrlProtocol(protocol) ? proxyUrl.href : "";
+      return isProxyableUrlProtocol(protocol) &&
+        !shouldBypassManagedProxy(bypassPolicy, url, "unknown")
+        ? proxyUrl.href
+        : "";
     },
   };
 }
 
 function createUndiciProxyDispatcher(
   options:
-    | { mode: "managed"; proxyUrl: string }
+    | { mode: "managed"; resolver: ProxyResolver }
     | { mode: "ambient"; env: ProxyEnvSnapshot; active: boolean },
   proxyCa: string | undefined,
 ): Dispatcher {
@@ -297,10 +324,98 @@ function createUndiciProxyDispatcher(
     }
     return new AmbientUndiciDispatcher(options.env, proxyCa);
   }
-  return new UndiciProxyAgent({
-    uri: options.proxyUrl,
-    ...(proxyCa !== undefined ? { proxyTls: { ca: proxyCa } } : {}),
-  });
+  return new ManagedUndiciDispatcher(options.resolver, proxyCa);
+}
+
+class ManagedUndiciDispatcher extends Dispatcher {
+  readonly #directDispatcher = new UndiciAgent();
+  readonly #proxyCa: string | undefined;
+  readonly #proxyDispatchers = new Map<string, UndiciProxyAgent>();
+  readonly #resolver: ProxyResolver;
+  #closedError: Error | undefined;
+
+  public constructor(resolver: ProxyResolver, proxyCa: string | undefined) {
+    super();
+    this.#resolver = resolver;
+    this.#proxyCa = proxyCa;
+  }
+
+  public override dispatch(
+    options: Dispatcher.DispatchOptions,
+    handler: Dispatcher.DispatchHandler,
+  ): boolean {
+    if (this.#closedError !== undefined) {
+      if (handler.onError === undefined) {
+        throw this.#closedError;
+      }
+      handler.onError(this.#closedError);
+      return false;
+    }
+    const url = resolveUndiciDispatchUrl(options);
+    const proxyUrl = url === undefined ? "" : this.#resolver.getProxyForUrl(url);
+    const dispatcher = proxyUrl === "" ? this.#directDispatcher : this.#proxyDispatcher(proxyUrl);
+    return dispatcher.dispatch(options, handler);
+  }
+
+  public override close(callback: () => void): void;
+  public override close(): Promise<void>;
+  public override close(callback?: () => void): Promise<void> | void {
+    const closing = this.#closeAll();
+    if (callback === undefined) {
+      return closing;
+    }
+    closing.then(callback, callback);
+  }
+
+  public override destroy(): Promise<void>;
+  public override destroy(error: Error | null): Promise<void>;
+  public override destroy(callback: () => void): void;
+  public override destroy(error: Error | null, callback: () => void): void;
+  public override destroy(
+    errorOrCallback?: Error | null | (() => void),
+    callback?: () => void,
+  ): Promise<void> | void {
+    const error = typeof errorOrCallback === "function" ? null : errorOrCallback ?? null;
+    const destroyCallback = typeof errorOrCallback === "function" ? errorOrCallback : callback;
+    const destroying = this.#destroyAll(error);
+    if (destroyCallback === undefined) {
+      return destroying;
+    }
+    destroying.then(destroyCallback, destroyCallback);
+  }
+
+  #proxyDispatcher(proxyUrl: string): UndiciProxyAgent {
+    const existing = this.#proxyDispatchers.get(proxyUrl);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const dispatcher = new UndiciProxyAgent({
+      uri: proxyUrl,
+      ...(this.#proxyCa !== undefined ? { proxyTls: { ca: this.#proxyCa } } : {}),
+    });
+    this.#proxyDispatchers.set(proxyUrl, dispatcher);
+    return dispatcher;
+  }
+
+  async #closeAll(): Promise<void> {
+    this.#closedError ??= new undiciErrors.ClientClosedError();
+    const proxyDispatchers = [...this.#proxyDispatchers.values()];
+    this.#proxyDispatchers.clear();
+    await Promise.all([
+      this.#directDispatcher.close(),
+      ...proxyDispatchers.map((dispatcher) => dispatcher.close()),
+    ]);
+  }
+
+  async #destroyAll(error: Error | null): Promise<void> {
+    this.#closedError ??= error ?? new undiciErrors.ClientDestroyedError();
+    const proxyDispatchers = [...this.#proxyDispatchers.values()];
+    this.#proxyDispatchers.clear();
+    await Promise.all([
+      this.#directDispatcher.destroy(error),
+      ...proxyDispatchers.map((dispatcher) => dispatcher.destroy(error)),
+    ]);
+  }
 }
 
 class AmbientUndiciDispatcher extends Dispatcher {
@@ -420,7 +535,7 @@ function restoreNodeHttpSnapshot(snapshot: NodeHttpStackSnapshot): void {
 function installRuntime(
   resolver: ProxyResolver,
   dispatcherOptions:
-    | { mode: "managed"; proxyUrl: string }
+    | { mode: "managed"; resolver: ProxyResolver }
     | { mode: "ambient"; env: ProxyEnvSnapshot; active: boolean },
   proxyCa: string | undefined,
 ): RuntimeInstall {
@@ -523,7 +638,7 @@ export function installProxyline(options: ProxylineOptions): ProxylineHandle {
   const ambientEnv = proxyUrl === undefined ? readProxyEnv() : undefined;
   const resolver =
     proxyUrl !== undefined
-      ? createManagedProxyResolver(proxyUrl)
+      ? createManagedProxyResolver(proxyUrl, options.bypassPolicy)
       : createAmbientProxyResolver(ambientEnv ?? EMPTY_PROXY_ENV);
   const redactedProxyUrl = resolver.describeProxy();
   const hasActiveProxy = resolver.active;
@@ -531,7 +646,7 @@ export function installProxyline(options: ProxylineOptions): ProxylineHandle {
     ? installRuntime(
         resolver,
         proxyUrl !== undefined
-          ? { mode: "managed", proxyUrl: proxyUrl.href }
+          ? { mode: "managed", resolver }
           : { mode: "ambient", env: ambientEnv ?? EMPTY_PROXY_ENV, active: hasActiveProxy },
         proxyCa,
       )
@@ -558,7 +673,7 @@ export function installProxyline(options: ProxylineOptions): ProxylineHandle {
         ? new UndiciAgent()
         : createUndiciProxyDispatcher(
             proxyUrl !== undefined
-              ? { mode: "managed", proxyUrl: proxyUrl.href }
+              ? { mode: "managed", resolver }
               : { mode: "ambient", env: ambientEnv ?? EMPTY_PROXY_ENV, active: hasActiveProxy },
             proxyCa,
           ),

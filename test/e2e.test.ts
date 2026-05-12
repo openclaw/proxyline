@@ -804,6 +804,29 @@ test("managed mode routes undici fetch through the lab proxy", async () => {
   }
 });
 
+test("managed mode bypass policy sends matching node and undici traffic direct", async () => {
+  const lab = await startProxyLab();
+  const targetHost = new URL(lab.targetUrl).host;
+  const proxy = installGlobalProxy({
+    mode: "managed",
+    proxyUrl: lab.proxyUrl,
+    bypassPolicy: ({ url }) => new URL(url).host === targetHost,
+  });
+  try {
+    const nodeDenied = await readHttp(`${lab.targetUrl}/denied`);
+    const undiciDenied = await fetch(`${lab.targetUrl}/denied`);
+
+    assert.equal(nodeDenied.status, 200);
+    assert.equal(nodeDenied.body, "target denied endpoint reached unexpectedly\n");
+    assert.equal(undiciDenied.status, 200);
+    assert.equal(await undiciDenied.text(), "target denied endpoint reached unexpectedly\n");
+    assert.equal(lab.events.length, 0);
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
 test("managed mode trusts an HTTPS proxy endpoint with scoped CA", async () => {
   const lab = await startProxyLab({ secureProxy: true });
   const proxyCa = lab.proxyCa;
