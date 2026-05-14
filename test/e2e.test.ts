@@ -3,6 +3,7 @@ import { once } from "node:events";
 import http from "node:http";
 import https from "node:https";
 import { type AddressInfo } from "node:net";
+import { type Duplex } from "node:stream";
 import { URL } from "node:url";
 import test from "node:test";
 import { Dispatcher, fetch } from "undici";
@@ -176,6 +177,56 @@ test("ambient mode routes node:http through HTTP_PROXY", async () => {
   }
 });
 
+test("managed mode evaluates node:http proxy policy against the socket destination", async () => {
+  const lab = await startProxyLab();
+  const targetUrl = new URL(lab.targetUrl);
+  const proxy = installGlobalProxy({
+    mode: "managed",
+    proxyUrl: lab.proxyUrl,
+    bypassPolicy: ({ url }) => new URL(url).hostname === "localhost",
+  });
+  try {
+    const denied = await readHttpOptions({
+      headers: { host: "localhost" },
+      hostname: targetUrl.hostname,
+      path: "/denied",
+      port: targetUrl.port,
+      protocol: "http:",
+    });
+
+    assert.equal(denied.status, 403);
+    assert.match(denied.body, /blocked by proxy lab/);
+    assert.ok(lab.events.some((event) => event.type === "deny" && event.url.endsWith("/denied")));
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
+test("managed mode preserves origin-form paths that start with double slash", async () => {
+  const lab = await startProxyLab();
+  const targetUrl = new URL(lab.targetUrl);
+  const proxy = installGlobalProxy({ mode: "managed", proxyUrl: lab.proxyUrl });
+  try {
+    const response = await readHttpOptions({
+      hostname: targetUrl.hostname,
+      path: "//double",
+      port: targetUrl.port,
+      protocol: "http:",
+    });
+
+    assert.equal(response.status, 200);
+    assert.ok(
+      lab.events.some(
+        (event) => event.type === "request" && event.url === `${lab.targetUrl}//double`,
+      ),
+    );
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
 test("ambient mode preserves absolute-form HTTPS request paths on node:http", async () => {
   const lab = await startProxyLab();
   const proxy = withProxyEnv({ HTTPS_PROXY: lab.proxyUrl }, () =>
@@ -236,6 +287,51 @@ test("managed mode uses port 443 for default-port node:https CONNECT targets", a
       proxy.stop();
     }
   });
+});
+
+test("managed mode times out stalled node:https CONNECT handshakes", async () => {
+  const proxyServer = http.createServer();
+  const activeSockets = new Set<Duplex>();
+  const allSockets = new Set<Duplex>();
+  proxyServer.on("connect", (_req, socket) => {
+    activeSockets.add(socket);
+    allSockets.add(socket);
+    socket.once("end", () => {
+      activeSockets.delete(socket);
+    });
+    socket.once("close", () => {
+      activeSockets.delete(socket);
+      allSockets.delete(socket);
+    });
+  });
+  proxyServer.listen(0, "127.0.0.1");
+  await once(proxyServer, "listening");
+  const address = proxyServer.address() as AddressInfo;
+  const proxy = installGlobalProxy({
+    mode: "managed",
+    proxyUrl: `http://127.0.0.1:${address.port}`,
+  });
+  try {
+    await assert.rejects(readHttps("https://example.test/allowed", { timeout: 50 }), /timed out/);
+    for (let attempt = 0; attempt < 20 && activeSockets.size > 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.equal(activeSockets.size, 0);
+  } finally {
+    proxy.stop();
+    for (const socket of allSockets) {
+      socket.destroy();
+    }
+    await new Promise<void>((resolve, reject) => {
+      proxyServer.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+  }
 });
 
 test("ambient Node proxy helper trusts HTTPS proxy endpoints with scoped proxy TLS", async () => {

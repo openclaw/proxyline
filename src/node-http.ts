@@ -224,9 +224,37 @@ function requestProtocol(req: http.ClientRequest, options: NodeAgentRequestOptio
   return isWebSocket ? "ws:" : "http:";
 }
 
+function normalizedPort(value: unknown): number | undefined {
+  if (typeof value !== "number" && typeof value !== "string") {
+    return undefined;
+  }
+  const port = Number(value);
+  return Number.isInteger(port) && port >= 1 && port <= 65_535 ? port : undefined;
+}
+
+function normalizedPositiveInteger(value: unknown): number | undefined {
+  if (typeof value !== "number" && typeof value !== "string") {
+    return undefined;
+  }
+  const integer = Number(value);
+  return Number.isInteger(integer) && integer > 0 ? integer : undefined;
+}
+
+function requestAuthority(options: NodeAgentRequestOptions): string {
+  const rawHost = options.hostname ?? options.host ?? "localhost";
+  const parsed = splitHostPort(String(rawHost));
+  const host = parsed.host || "localhost";
+  const port = parsed.port ?? normalizedPort(options.port);
+  const authorityHost = net.isIPv6(host) ? `[${host}]` : host;
+  return port === undefined ? authorityHost : `${authorityHost}:${port}`;
+}
+
 function requestUrl(req: http.ClientRequest, options: NodeAgentRequestOptions): string {
-  const host = req.getHeader("host") ?? options.host ?? options.hostname ?? "localhost";
-  return new URL(req.path, `${requestProtocol(req, options)}//${String(host)}`).href;
+  if (/^(?:https?|wss?):\/\//i.test(req.path)) {
+    return new URL(req.path).href;
+  }
+  const path = req.path.startsWith("/") ? req.path : `/${req.path}`;
+  return `${requestProtocol(req, options)}//${requestAuthority(options)}${path}`;
 }
 
 function setProxyRequestHeaders(req: http.ClientRequest, proxy: URL, keepAlive: boolean): void {
@@ -363,6 +391,8 @@ class ProxylineHttpForwardAgent extends http.Agent {
 class ProxylineConnectAgent extends http.Agent {
   public readonly options: NodeAgentOptions;
   readonly #keepAlive: boolean;
+  readonly #pendingRequests = new WeakMap<NodeAgentRequestOptions, http.ClientRequest>();
+  readonly #pendingRequestQueue: http.ClientRequest[] = [];
   readonly #proxy: URL;
   readonly #proxyTls: ProxylineTlsOptions | undefined;
 
@@ -375,7 +405,24 @@ class ProxylineConnectAgent extends http.Agent {
   }
 
   public addRequest(req: http.ClientRequest, options: NodeAgentRequestOptions): void {
-    (http.Agent.prototype as unknown as NodeAddRequestAgent).addRequest.call(this, req, options);
+    this.#pendingRequests.set(options, req);
+    this.#pendingRequestQueue.push(req);
+    req.once("socket", () => this.#removePendingRequest(req));
+    req.once("close", () => this.#removePendingRequest(req));
+    try {
+      (http.Agent.prototype as unknown as NodeAddRequestAgent).addRequest.call(this, req, options);
+    } catch (error) {
+      this.#pendingRequests.delete(options);
+      this.#removePendingRequest(req);
+      throw error;
+    }
+  }
+
+  #removePendingRequest(req: http.ClientRequest): void {
+    const index = this.#pendingRequestQueue.indexOf(req);
+    if (index !== -1) {
+      this.#pendingRequestQueue.splice(index, 1);
+    }
   }
 
   public override createConnection(
@@ -383,21 +430,36 @@ class ProxylineConnectAgent extends http.Agent {
     callback?: (error: Error | null, socket: net.Socket) => void,
   ): net.Socket {
     const proxySocket = connectToProxy(this.#proxy, this.#proxyTls);
+    const mappedRequest = this.#pendingRequests.get(options);
+    const request = mappedRequest ?? this.#pendingRequestQueue.shift();
+    this.#pendingRequests.delete(options);
+    if (mappedRequest !== undefined) {
+      this.#removePendingRequest(mappedRequest);
+    }
     if (callback === undefined) {
       proxySocket.destroy();
       throw new ProxylineError("INVALID_CONNECT_CALLBACK", "CONNECT agents require an async socket callback.");
     }
 
+    let pendingTimeout: ReturnType<typeof setTimeout> | undefined;
     let settled = false;
     let responseBuffer = Buffer.alloc(0);
 
     const cleanup = (): void => {
+      if (pendingTimeout !== undefined) {
+        clearTimeout(pendingTimeout);
+        pendingTimeout = undefined;
+      }
       proxySocket.off("data", onData);
       proxySocket.off("error", onError);
       proxySocket.off("end", onClosed);
       proxySocket.off("close", onClosed);
       proxySocket.off("connect", onConnected);
       proxySocket.off("secureConnect", onConnected);
+      request?.off("abort", onRequestClosed);
+      request?.off("close", onRequestClosed);
+      request?.off("error", onRequestClosed);
+      request?.off("timeout", onRequestTimedOut);
     };
 
     const finish = (error: Error | null, socket: net.Socket): void => {
@@ -485,6 +547,34 @@ class ProxylineConnectAgent extends http.Agent {
     const onClosed = (): void => {
       fail(new ProxylineError("CONNECT_FAILED", "proxy socket closed before CONNECT completed"));
     };
+
+    const onRequestClosed = (): void => {
+      if (!settled) {
+        fail(new ProxylineError("CONNECT_FAILED", "request closed before proxy CONNECT completed"));
+      }
+    };
+
+    const onRequestTimedOut = (): void => {
+      if (!settled) {
+        fail(new ProxylineError("CONNECT_FAILED", "proxy CONNECT timed out"));
+      }
+    };
+
+    const requestTimeout = (request as { timeout?: unknown } | undefined)?.timeout;
+    const timeoutMs = normalizedPositiveInteger(options.timeout ?? requestTimeout);
+    if (timeoutMs !== undefined) {
+      pendingTimeout = setTimeout(() => {
+        request?.emit("timeout");
+        if (!settled) {
+          fail(new ProxylineError("CONNECT_FAILED", "proxy CONNECT timed out"));
+        }
+      }, timeoutMs);
+      pendingTimeout.unref?.();
+    }
+    request?.once("abort", onRequestClosed);
+    request?.once("close", onRequestClosed);
+    request?.once("error", onRequestClosed);
+    request?.once("timeout", onRequestTimedOut);
 
     proxySocket.once(this.#proxy.protocol === "https:" ? "secureConnect" : "connect", onConnected);
     proxySocket.on("data", onData);
