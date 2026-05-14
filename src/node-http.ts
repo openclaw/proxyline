@@ -23,6 +23,11 @@ type NodeAgentRequestOptions = http.RequestOptions & https.RequestOptions & {
 type NodeAddRequestAgent = http.Agent & {
   addRequest(req: http.ClientRequest, options: NodeAgentRequestOptions): void;
 };
+type RequestSetTimeout = (
+  this: http.ClientRequest,
+  timeout: number,
+  callback?: () => void,
+) => http.ClientRequest;
 type NodeAgentWithOptions = http.Agent & {
   options?: NodeAgentOptions;
 };
@@ -444,12 +449,40 @@ class ProxylineConnectAgent extends http.Agent {
     let pendingTimeout: ReturnType<typeof setTimeout> | undefined;
     let settled = false;
     let responseBuffer = Buffer.alloc(0);
+    let originalRequestSetTimeout: RequestSetTimeout | undefined;
+    let hookedRequestSetTimeout: RequestSetTimeout | undefined;
+
+    const startPendingTimeout = (timeoutMs: number): void => {
+      if (pendingTimeout !== undefined) {
+        clearTimeout(pendingTimeout);
+      }
+      pendingTimeout = setTimeout(() => {
+        request?.emit("timeout");
+        if (!settled) {
+          fail(new ProxylineError("CONNECT_FAILED", "proxy CONNECT timed out"));
+        }
+      }, timeoutMs);
+      pendingTimeout.unref?.();
+    };
+
+    const restoreRequestTimeoutHook = (): void => {
+      if (
+        request !== undefined &&
+        originalRequestSetTimeout !== undefined &&
+        request.setTimeout === hookedRequestSetTimeout
+      ) {
+        request.setTimeout = originalRequestSetTimeout;
+      }
+      originalRequestSetTimeout = undefined;
+      hookedRequestSetTimeout = undefined;
+    };
 
     const cleanup = (): void => {
       if (pendingTimeout !== undefined) {
         clearTimeout(pendingTimeout);
         pendingTimeout = undefined;
       }
+      restoreRequestTimeoutHook();
       proxySocket.off("data", onData);
       proxySocket.off("error", onError);
       proxySocket.off("end", onClosed);
@@ -560,16 +593,23 @@ class ProxylineConnectAgent extends http.Agent {
       }
     };
 
+    if (request !== undefined) {
+      originalRequestSetTimeout = request.setTimeout;
+      hookedRequestSetTimeout = function hookedSetTimeout(timeout, callback) {
+        const result = originalRequestSetTimeout?.call(this, timeout, callback) ?? this;
+        const timeoutMs = normalizedPositiveInteger(timeout);
+        if (timeoutMs !== undefined) {
+          startPendingTimeout(timeoutMs);
+        }
+        return result;
+      };
+      request.setTimeout = hookedRequestSetTimeout;
+    }
+
     const requestTimeout = (request as { timeout?: unknown } | undefined)?.timeout;
     const timeoutMs = normalizedPositiveInteger(options.timeout ?? requestTimeout);
     if (timeoutMs !== undefined) {
-      pendingTimeout = setTimeout(() => {
-        request?.emit("timeout");
-        if (!settled) {
-          fail(new ProxylineError("CONNECT_FAILED", "proxy CONNECT timed out"));
-        }
-      }, timeoutMs);
-      pendingTimeout.unref?.();
+      startPendingTimeout(timeoutMs);
     }
     request?.once("abort", onRequestClosed);
     request?.once("close", onRequestClosed);
@@ -633,14 +673,22 @@ export class ProxylineNodeProxyAgent extends http.Agent {
 
   #callStackProtocol(): "http" | "https" | undefined {
     const originalStackTraceLimit = Error.stackTraceLimit;
+    const errorConstructor = Error as unknown as { prepareStackTrace?: unknown };
+    const originalPrepareStackTrace = errorConstructor.prepareStackTrace;
     if (typeof originalStackTraceLimit === "number" && originalStackTraceLimit < 20) {
       // Node reads agent.protocol/defaultPort before addRequest, so this is the only caller signal.
       Error.stackTraceLimit = 20;
     }
     let stack: string | undefined;
     try {
+      delete errorConstructor.prepareStackTrace;
       stack = new Error().stack;
     } finally {
+      if (originalPrepareStackTrace === undefined) {
+        delete errorConstructor.prepareStackTrace;
+      } else {
+        errorConstructor.prepareStackTrace = originalPrepareStackTrace;
+      }
       Error.stackTraceLimit = originalStackTraceLimit;
     }
     if (typeof stack !== "string") {

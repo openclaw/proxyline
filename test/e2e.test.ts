@@ -156,6 +156,44 @@ async function withConnectRecorder<T>(
   }
 }
 
+async function withStalledConnectProxy<T>(
+  run: (proxyUrl: string, activeSockets: Set<Duplex>) => Promise<T>,
+): Promise<T> {
+  const proxyServer = http.createServer();
+  const activeSockets = new Set<Duplex>();
+  const allSockets = new Set<Duplex>();
+  proxyServer.on("connect", (_req, socket) => {
+    activeSockets.add(socket);
+    allSockets.add(socket);
+    socket.once("end", () => {
+      activeSockets.delete(socket);
+    });
+    socket.once("close", () => {
+      activeSockets.delete(socket);
+      allSockets.delete(socket);
+    });
+  });
+  proxyServer.listen(0, "127.0.0.1");
+  await once(proxyServer, "listening");
+  const address = proxyServer.address() as AddressInfo;
+  try {
+    return await run(`http://127.0.0.1:${address.port}`, activeSockets);
+  } finally {
+    for (const socket of allSockets) {
+      socket.destroy();
+    }
+    await new Promise<void>((resolve, reject) => {
+      proxyServer.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+  }
+}
+
 test("ambient mode routes node:http through HTTP_PROXY", async () => {
   const lab = await startProxyLab();
   const proxy = withProxyEnv({ HTTP_PROXY: lab.proxyUrl }, () =>
@@ -314,49 +352,74 @@ test("node helper agents infer default HTTPS ports with stack traces disabled", 
   });
 });
 
+test("node helper agents infer default HTTPS ports with custom stack formatters", async () => {
+  await withConnectRecorder(async (proxyUrl, authorities) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
+    };
+    const agent = createNodeProxyAgent(resolver, undefined);
+    const originalPrepareStackTrace = Error.prepareStackTrace;
+    Error.prepareStackTrace = () => [];
+    try {
+      await assert.rejects(readHttps("https://example.test/allowed", { agent, timeout: 1_000 }));
+      assert.deepEqual(authorities, ["example.test:443"]);
+    } finally {
+      Error.prepareStackTrace = originalPrepareStackTrace;
+      agent.destroy();
+    }
+  });
+});
+
 test("managed mode times out stalled node:https CONNECT handshakes", async () => {
-  const proxyServer = http.createServer();
-  const activeSockets = new Set<Duplex>();
-  const allSockets = new Set<Duplex>();
-  proxyServer.on("connect", (_req, socket) => {
-    activeSockets.add(socket);
-    allSockets.add(socket);
-    socket.once("end", () => {
-      activeSockets.delete(socket);
+  await withStalledConnectProxy(async (proxyUrl, activeSockets) => {
+    const proxy = installGlobalProxy({
+      mode: "managed",
+      proxyUrl,
     });
-    socket.once("close", () => {
-      activeSockets.delete(socket);
-      allSockets.delete(socket);
-    });
-  });
-  proxyServer.listen(0, "127.0.0.1");
-  await once(proxyServer, "listening");
-  const address = proxyServer.address() as AddressInfo;
-  const proxy = installGlobalProxy({
-    mode: "managed",
-    proxyUrl: `http://127.0.0.1:${address.port}`,
-  });
-  try {
-    await assert.rejects(readHttps("https://example.test/allowed", { timeout: 50 }), /timed out/);
-    for (let attempt = 0; attempt < 20 && activeSockets.size > 0; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 25));
+    try {
+      await assert.rejects(readHttps("https://example.test/allowed", { timeout: 50 }), /timed out/);
+      for (let attempt = 0; attempt < 20 && activeSockets.size > 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.equal(activeSockets.size, 0);
+    } finally {
+      proxy.stop();
     }
-    assert.equal(activeSockets.size, 0);
-  } finally {
-    proxy.stop();
-    for (const socket of allSockets) {
-      socket.destroy();
-    }
-    await new Promise<void>((resolve, reject) => {
-      proxyServer.close((error) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve();
-      });
+  });
+});
+
+test("managed mode honors req.setTimeout during stalled node:https CONNECT handshakes", async () => {
+  await withStalledConnectProxy(async (proxyUrl, activeSockets) => {
+    const proxy = installGlobalProxy({
+      mode: "managed",
+      proxyUrl,
     });
-  }
+    try {
+      await assert.rejects(
+        new Promise<void>((resolve, reject) => {
+          const req = https.get("https://example.test/allowed", () => {
+            resolve();
+          });
+          req.setTimeout(50, () => {
+            req.destroy(new Error("late request timeout"));
+          });
+          req.on("error", reject);
+        }),
+        /timeout|timed out/,
+      );
+      for (let attempt = 0; attempt < 20 && activeSockets.size > 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.equal(activeSockets.size, 0);
+    } finally {
+      proxy.stop();
+    }
+  });
 });
 
 test("ambient Node proxy helper trusts HTTPS proxy endpoints with scoped proxy TLS", async () => {
