@@ -739,6 +739,59 @@ test("node CONNECT agent destroys pending proxy sockets when the agent is destro
   });
 });
 
+test("node CONNECT agent fails requests when destination TLS closes during handshake", async () => {
+  const netMutable = net as unknown as { connect: (...args: unknown[]) => net.Socket };
+  const tlsMutable = tls as unknown as { connect: (...args: unknown[]) => tls.TLSSocket };
+  const originalNetConnect = netMutable.connect;
+  const originalTlsConnect = tlsMutable.connect;
+  let tlsSocket: FakeProxySocket | undefined;
+  const resolver: ProxyResolver = {
+    active: true,
+    describeProxy: () => "http://proxy.example:8080/",
+    explain: () => {
+      throw new Error("not used");
+    },
+    getProxyForUrl: () => "http://proxy.example:8080/",
+  };
+  const agent = createNodeProxyAgent(resolver, undefined, "https");
+  try {
+    netMutable.connect = () => {
+      const proxySocket = new FakeProxySocket();
+      queueMicrotask(() => proxySocket.emit("connect"));
+      return proxySocket as unknown as net.Socket;
+    };
+    tlsMutable.connect = () => {
+      tlsSocket = new FakeProxySocket();
+      return tlsSocket as unknown as tls.TLSSocket;
+    };
+
+    const requestError = new Promise<Error>((resolve) => {
+      const req = https.get("https://example.test/", { agent }, () => {});
+      req.once("error", resolve);
+    });
+    for (let attempt = 0; attempt < 20 && tlsSocket === undefined; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.ok(tlsSocket);
+
+    agent.destroy();
+
+    await assert.rejects(
+      Promise.race([
+        requestError.then((error) => {
+          throw error;
+        }),
+        new Promise<void>((resolve) => setTimeout(resolve, 500)),
+      ]),
+      /destination TLS socket closed/,
+    );
+  } finally {
+    netMutable.connect = originalNetConnect;
+    tlsMutable.connect = originalTlsConnect;
+    agent.destroy();
+  }
+});
+
 test("node CONNECT agent detaches its parser before destination TLS", async () => {
   const netMutable = net as unknown as { connect: (...args: unknown[]) => net.Socket };
   const tlsMutable = tls as unknown as { connect: (...args: unknown[]) => tls.TLSSocket };

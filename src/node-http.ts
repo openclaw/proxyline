@@ -625,14 +625,23 @@ class ProxylineConnectAgent extends http.Agent {
       tlsSocket = currentTlsSocket;
       this.#pendingConnectSockets.add(currentTlsSocket);
       const onTlsError = (error: Error): void => {
+        currentTlsSocket.off("close", onTlsClosed);
         finish(error, currentTlsSocket);
       };
       const onTlsSecureConnect = (): void => {
         currentTlsSocket.off("error", onTlsError);
+        currentTlsSocket.off("close", onTlsClosed);
         finish(null, currentTlsSocket);
+      };
+      const onTlsClosed = (): void => {
+        finish(
+          new ProxylineError("CONNECT_FAILED", "destination TLS socket closed before secureConnect"),
+          currentTlsSocket,
+        );
       };
       currentTlsSocket.once("secureConnect", onTlsSecureConnect);
       currentTlsSocket.once("error", onTlsError);
+      currentTlsSocket.once("close", onTlsClosed);
     };
 
     const onError = (error: Error): void => {
