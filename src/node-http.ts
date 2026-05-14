@@ -41,6 +41,7 @@ type NodeProxyAgentOptions = NodeAgentOptions & {
 
 const MAX_CONNECT_RESPONSE_HEADER_BYTES = 16 * 1024;
 const INVALID_PROXY_TARGET_HOST_DELIMITER_PATTERN = /[/:?#@\\]/;
+const INVALID_PROXY_TARGET_HOST_CONTROL_PATTERN = /[\u0000-\u0020\u007f]/;
 const nodeAgentDefaultPorts = new WeakMap<object, number>();
 
 export const CALLER_AGENT_TLS_OPTION_KEYS = [
@@ -357,6 +358,9 @@ function normalizeProxyTargetHost(host: string): string {
   }
   if (INVALID_PROXY_TARGET_HOST_DELIMITER_PATTERN.test(host)) {
     throw new ProxylineError("INVALID_CONNECT_TARGET", "CONNECT target host contains unsafe delimiters.");
+  }
+  if (INVALID_PROXY_TARGET_HOST_CONTROL_PATTERN.test(host)) {
+    throw new ProxylineError("INVALID_CONNECT_TARGET", "CONNECT target host contains unsafe characters.");
   }
   const asciiHost = domainToASCII(host);
   if (!asciiHost) {

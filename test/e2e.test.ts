@@ -464,6 +464,35 @@ test("node CONNECT agents reject delimiter-truncated object-form HTTPS hosts", a
   });
 });
 
+test("node CONNECT agents reject control-truncated object-form HTTPS hosts", async () => {
+  await withConnectRecorder(async (proxyUrl, authorities) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
+    };
+    const agent = createNodeProxyAgent(resolver, undefined);
+    try {
+      await assert.rejects(
+        readHttpsOptions({
+          agent,
+          hostname: "evil\thost.example",
+          path: "/allowed",
+          timeout: 1_000,
+        }),
+        (error: unknown) =>
+          error instanceof ProxylineError && error.code === "INVALID_CONNECT_TARGET",
+      );
+      assert.deepEqual(authorities, []);
+    } finally {
+      agent.destroy();
+    }
+  });
+});
+
 test("node CONNECT agents encode object-form HTTPS Unicode hosts", async () => {
   await withConnectRecorder(async (proxyUrl, authorities) => {
     const resolver: ProxyResolver = {
