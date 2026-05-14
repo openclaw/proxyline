@@ -440,6 +440,38 @@ test("node CONNECT agents encode object-form HTTPS Unicode hosts", async () => {
   });
 });
 
+test("node CONNECT agents ignore absolute-form paths for secure proxy decisions", async () => {
+  await withConnectRecorder(async (proxyUrl, authorities) => {
+    const seenUrls: string[] = [];
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: (url) => {
+        seenUrls.push(url);
+        return new URL(url).hostname === "bypass.example" ? "" : proxyUrl;
+      },
+    };
+    const agent = createNodeProxyAgent(resolver, undefined, "https");
+    try {
+      await assert.rejects(
+        readHttpsOptions({
+          agent,
+          hostname: "real.example",
+          path: "https://bypass.example/secret",
+          timeout: 1_000,
+        }),
+      );
+      assert.equal(new URL(seenUrls[0] ?? "").hostname, "real.example");
+      assert.deepEqual(authorities, ["real.example:443"]);
+    } finally {
+      agent.destroy();
+    }
+  });
+});
+
 test("node helper agents infer default HTTPS ports with stack traces disabled", async () => {
   await withConnectRecorder(async (proxyUrl, authorities) => {
     const resolver: ProxyResolver = {
@@ -553,6 +585,40 @@ test("managed mode honors req.setTimeout during stalled node:https CONNECT hands
       assert.equal(activeSockets.size, 0);
     } finally {
       proxy.stop();
+    }
+  });
+});
+
+test("node CONNECT agent clears pending timeouts when req.setTimeout disables them", async () => {
+  await withStalledConnectProxy(async (proxyUrl, activeSockets) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
+    };
+    const agent = createNodeProxyAgent(resolver, undefined, "https");
+    const req = https.get("https://example.test/allowed", { agent, timeout: 50 }, () => {});
+    let requestError: Error | undefined;
+    req.on("error", (error) => {
+      requestError = error;
+    });
+    try {
+      req.setTimeout(0);
+      for (let attempt = 0; attempt < 20 && activeSockets.size === 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.equal(activeSockets.size, 1);
+
+      await new Promise((resolve) => setTimeout(resolve, 120));
+
+      assert.equal(requestError, undefined);
+      assert.equal(activeSockets.size, 1);
+    } finally {
+      req.destroy();
+      agent.destroy();
     }
   });
 });

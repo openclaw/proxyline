@@ -265,7 +265,7 @@ function requestUrl(
   options: NodeAgentRequestOptions,
   stackProtocol: "http" | "https" | undefined,
 ): string {
-  if (/^(?:https?|wss?):\/\//i.test(req.path)) {
+  if (!shouldTunnelRequest(req, options, stackProtocol) && /^(?:https?|wss?):\/\//i.test(req.path)) {
     return new URL(req.path).href;
   }
   const path = req.path.startsWith("/") ? req.path : `/${req.path}`;
@@ -500,6 +500,13 @@ class ProxylineConnectAgent extends http.Agent {
       pendingTimeout.unref?.();
     };
 
+    const clearPendingTimeout = (): void => {
+      if (pendingTimeout !== undefined) {
+        clearTimeout(pendingTimeout);
+        pendingTimeout = undefined;
+      }
+    };
+
     const restoreRequestTimeoutHook = (): void => {
       if (
         request !== undefined &&
@@ -522,10 +529,7 @@ class ProxylineConnectAgent extends http.Agent {
     };
 
     const cleanup = (): void => {
-      if (pendingTimeout !== undefined) {
-        clearTimeout(pendingTimeout);
-        pendingTimeout = undefined;
-      }
+      clearPendingTimeout();
       this.#pendingConnectSockets.delete(proxySocket);
       if (tlsSocket !== undefined) {
         this.#pendingConnectSockets.delete(tlsSocket);
@@ -646,6 +650,8 @@ class ProxylineConnectAgent extends http.Agent {
         const timeoutMs = normalizedPositiveInteger(timeout);
         if (timeoutMs !== undefined) {
           startPendingTimeout(timeoutMs);
+        } else {
+          clearPendingTimeout();
         }
         return result;
       };
