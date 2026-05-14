@@ -36,7 +36,7 @@
     "build": "tsc -p tsconfig.build.json",
     "check": "pnpm build && tsc --noEmit && pnpm coverage:run",
     "coverage": "pnpm build && pnpm coverage:run",
-    "coverage:run": "node --import tsx --test --experimental-test-coverage --test-coverage-include='src/**/*.ts' --test-coverage-lines=85 --test-coverage-branches=80 --test-coverage-functions=80 test/index.test.ts test/e2e.test.ts test/package.test.ts",
+    "coverage:run": "node scripts/run-coverage.mjs",
     "docs:build": "node scripts/build-docs-site.mjs",
     "package:dry-run": "pnpm pack --dry-run",
     "prepack": "node scripts/prepack-build.mjs",
