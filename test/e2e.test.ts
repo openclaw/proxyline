@@ -14,6 +14,7 @@ import {
   createAmbientNodeProxyAgent,
   installGlobalProxy,
   openProxyConnectTunnel,
+  ProxylineError,
 } from "../src/index.js";
 import { createNodeProxyAgent } from "../src/node-http.js";
 import type { ProxyResolver } from "../src/types.js";
@@ -376,6 +377,36 @@ test("node helper agents route object-form HTTPS requests as secure endpoints", 
         }),
       );
       assert.deepEqual(authorities, ["example.test:443"]);
+    } finally {
+      agent.destroy();
+    }
+  });
+});
+
+test("node CONNECT agents reject unsafe object-form HTTPS hosts before proxying", async () => {
+  await withConnectRecorder(async (proxyUrl, authorities) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
+    };
+    const agent = createNodeProxyAgent(resolver, undefined);
+    try {
+      await assert.rejects(
+        readHttpsOptions({
+          agent,
+          headers: { host: "safe.example" },
+          hostname: "evil.example\r\nProxy-Authorization: injected",
+          path: "/allowed",
+          timeout: 1_000,
+        }),
+        (error: unknown) =>
+          error instanceof ProxylineError && error.code === "INVALID_CONNECT_TARGET",
+      );
+      assert.deepEqual(authorities, []);
     } finally {
       agent.destroy();
     }

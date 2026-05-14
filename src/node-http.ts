@@ -7,6 +7,7 @@ import {
   resolveAmbientProxyForUrl,
   type ProxyEnvSnapshot,
 } from "./env.js";
+import { formatConnectAuthority } from "./connect.js";
 import { ProxylineError, resolveProxyTlsCa, type ProxylineTlsOptions } from "./shared.js";
 import type { ProxyResolver } from "./types.js";
 
@@ -349,9 +350,10 @@ function connectTarget(options: NodeAgentRequestOptions): { host: string; port: 
   }
   const parsed = splitHostPort(rawHost);
   const port = parsed.port ?? Number(options.port);
-  if (!parsed.host || !Number.isInteger(port) || port < 1 || port > 65_535) {
+  if (!parsed.host || !Number.isInteger(port)) {
     throw new ProxylineError("INVALID_CONNECT_TARGET", "CONNECT target is missing host or port.");
   }
+  formatConnectAuthority(parsed.host, port);
   return { host: parsed.host, port };
 }
 
@@ -541,7 +543,7 @@ class ProxylineConnectAgent extends http.Agent {
         return;
       }
       const { host, port } = target;
-      const authority = net.isIPv6(host) ? `[${host}]:${port}` : `${host}:${port}`;
+      const authority = formatConnectAuthority(host, port);
       const headers = [
         `CONNECT ${authority} HTTP/1.1`,
         `Host: ${authority}`,
