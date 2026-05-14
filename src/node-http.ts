@@ -2,6 +2,7 @@ import http from "node:http";
 import https from "node:https";
 import net from "node:net";
 import tls from "node:tls";
+import { domainToASCII } from "node:url";
 import {
   readProxyEnv,
   resolveAmbientProxyForUrl,
@@ -253,7 +254,7 @@ function normalizedPositiveInteger(value: unknown): number | undefined {
 function requestAuthority(options: NodeAgentRequestOptions): string {
   const rawHost = options.hostname ?? options.host ?? "localhost";
   const parsed = splitHostPort(String(rawHost));
-  const host = parsed.host || "localhost";
+  const host = normalizeProxyTargetHost(parsed.host || "localhost");
   const port = parsed.port ?? normalizedPort(options.port);
   const authorityHost = net.isIPv6(host) ? `[${host}]` : host;
   return port === undefined ? authorityHost : `${authorityHost}:${port}`;
@@ -343,6 +344,19 @@ function splitHostPort(value: string): { host: string; port?: number } {
   return { host: value };
 }
 
+function normalizeProxyTargetHost(host: string): string {
+  const unbracketedHost =
+    host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
+  if (net.isIP(unbracketedHost) !== 0) {
+    return unbracketedHost;
+  }
+  const asciiHost = domainToASCII(host);
+  if (!asciiHost) {
+    throw new ProxylineError("INVALID_CONNECT_TARGET", "CONNECT target host is not a valid host name.");
+  }
+  return asciiHost;
+}
+
 function connectTarget(options: NodeAgentRequestOptions): { host: string; port: number } {
   const rawHost = options.hostname ?? options.host;
   if (typeof rawHost !== "string") {
@@ -353,8 +367,9 @@ function connectTarget(options: NodeAgentRequestOptions): { host: string; port: 
   if (!parsed.host || !Number.isInteger(port)) {
     throw new ProxylineError("INVALID_CONNECT_TARGET", "CONNECT target is missing host or port.");
   }
-  formatConnectAuthority(parsed.host, port);
-  return { host: parsed.host, port };
+  const host = normalizeProxyTargetHost(parsed.host);
+  formatConnectAuthority(host, port);
+  return { host, port };
 }
 
 function destinationTlsConnectOptions(

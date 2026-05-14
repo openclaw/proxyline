@@ -413,6 +413,33 @@ test("node CONNECT agents reject unsafe object-form HTTPS hosts before proxying"
   });
 });
 
+test("node CONNECT agents encode object-form HTTPS Unicode hosts", async () => {
+  await withConnectRecorder(async (proxyUrl, authorities) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
+    };
+    const agent = createNodeProxyAgent(resolver, undefined);
+    try {
+      await assert.rejects(
+        readHttpsOptions({
+          agent,
+          hostname: "bücher.example",
+          path: "/allowed",
+          timeout: 1_000,
+        }),
+      );
+      assert.deepEqual(authorities, ["xn--bcher-kva.example:443"]);
+    } finally {
+      agent.destroy();
+    }
+  });
+});
+
 test("node helper agents infer default HTTPS ports with stack traces disabled", async () => {
   await withConnectRecorder(async (proxyUrl, authorities) => {
     const resolver: ProxyResolver = {
