@@ -3,6 +3,8 @@
 ## 0.1.1 - 2026-05-12
 
 - Hardened ambient proxy routing, CONNECT target validation, undici dispatcher cleanup, and generated package output after the runtime module split.
+- Added managed-mode `bypassPolicy` support so trusted callers can intentionally route selected loopback/control-plane traffic directly while keeping the rest of managed traffic proxied.
+- Stopped versioning generated `dist/` output in git; release and package dry-run flows now build `dist/` during `prepack` and still publish generated JavaScript, declarations, and declaration maps.
 
 ## 0.1.0 - 2026-05-11
 
