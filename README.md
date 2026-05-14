@@ -1,4 +1,4 @@
-# Proxyline
+# 🌐 Proxyline
 
 [![npm](https://img.shields.io/npm/v/%40openclaw%2Fproxyline.svg)](https://www.npmjs.com/package/@openclaw/proxyline)
 [![node](https://img.shields.io/node/v/%40openclaw%2Fproxyline.svg)](https://nodejs.org/)
