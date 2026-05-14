@@ -429,6 +429,7 @@ class ProxylineHttpForwardAgent extends http.Agent {
 class ProxylineConnectAgent extends http.Agent {
   public readonly options: NodeAgentOptions;
   readonly #keepAlive: boolean;
+  readonly #pendingConnectSockets = new Set<net.Socket>();
   readonly #pendingRequests = new WeakMap<NodeAgentRequestOptions, http.ClientRequest>();
   readonly #pendingRequestQueue: http.ClientRequest[] = [];
   readonly #proxy: URL;
@@ -467,7 +468,6 @@ class ProxylineConnectAgent extends http.Agent {
     options: NodeAgentRequestOptions,
     callback?: (error: Error | null, socket: net.Socket) => void,
   ): net.Socket {
-    const proxySocket = connectToProxy(this.#proxy, this.#proxyTls);
     const mappedRequest = this.#pendingRequests.get(options);
     const request = mappedRequest ?? this.#pendingRequestQueue.shift();
     this.#pendingRequests.delete(options);
@@ -475,15 +475,17 @@ class ProxylineConnectAgent extends http.Agent {
       this.#removePendingRequest(mappedRequest);
     }
     if (callback === undefined) {
-      proxySocket.destroy();
       throw new ProxylineError("INVALID_CONNECT_CALLBACK", "CONNECT agents require an async socket callback.");
     }
 
+    const proxySocket = connectToProxy(this.#proxy, this.#proxyTls);
+    this.#pendingConnectSockets.add(proxySocket);
     let pendingTimeout: ReturnType<typeof setTimeout> | undefined;
     let settled = false;
     let responseBuffer = Buffer.alloc(0);
     let originalRequestSetTimeout: RequestSetTimeout | undefined;
     let hookedRequestSetTimeout: RequestSetTimeout | undefined;
+    let tlsSocket: tls.TLSSocket | undefined;
 
     const startPendingTimeout = (timeoutMs: number): void => {
       if (pendingTimeout !== undefined) {
@@ -523,6 +525,10 @@ class ProxylineConnectAgent extends http.Agent {
       if (pendingTimeout !== undefined) {
         clearTimeout(pendingTimeout);
         pendingTimeout = undefined;
+      }
+      this.#pendingConnectSockets.delete(proxySocket);
+      if (tlsSocket !== undefined) {
+        this.#pendingConnectSockets.delete(tlsSocket);
       }
       restoreRequestTimeoutHook();
       cleanupProxyHandshakeListeners();
@@ -599,16 +605,18 @@ class ProxylineConnectAgent extends http.Agent {
         finish(null, proxySocket);
         return;
       }
-      const tlsSocket = tls.connect(destinationTlsConnectOptions(options, proxySocket));
+      const currentTlsSocket = tls.connect(destinationTlsConnectOptions(options, proxySocket));
+      tlsSocket = currentTlsSocket;
+      this.#pendingConnectSockets.add(currentTlsSocket);
       const onTlsError = (error: Error): void => {
-        finish(error, tlsSocket);
+        finish(error, currentTlsSocket);
       };
       const onTlsSecureConnect = (): void => {
-        tlsSocket.off("error", onTlsError);
-        finish(null, tlsSocket);
+        currentTlsSocket.off("error", onTlsError);
+        finish(null, currentTlsSocket);
       };
-      tlsSocket.once("secureConnect", onTlsSecureConnect);
-      tlsSocket.once("error", onTlsError);
+      currentTlsSocket.once("secureConnect", onTlsSecureConnect);
+      currentTlsSocket.once("error", onTlsError);
     };
 
     const onError = (error: Error): void => {
@@ -661,6 +669,14 @@ class ProxylineConnectAgent extends http.Agent {
     proxySocket.once("close", onClosed);
 
     return undefined as unknown as net.Socket;
+  }
+
+  public override destroy(): void {
+    for (const socket of this.#pendingConnectSockets) {
+      socket.destroy();
+    }
+    this.#pendingConnectSockets.clear();
+    super.destroy();
   }
 }
 

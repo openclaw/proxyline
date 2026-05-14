@@ -557,6 +557,42 @@ test("managed mode honors req.setTimeout during stalled node:https CONNECT hands
   });
 });
 
+test("node CONNECT agent destroys pending proxy sockets when the agent is destroyed", async () => {
+  await withStalledConnectProxy(async (proxyUrl, activeSockets) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
+    };
+    const agent = createNodeProxyAgent(resolver, undefined, "https");
+    const req = https.get("https://example.test/allowed", { agent }, () => {});
+    const requestClosed = new Promise<void>((resolve) => {
+      req.once("error", () => resolve());
+      req.once("close", () => resolve());
+    });
+    try {
+      for (let attempt = 0; attempt < 20 && activeSockets.size === 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.equal(activeSockets.size, 1);
+
+      agent.destroy();
+
+      for (let attempt = 0; attempt < 20 && activeSockets.size > 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.equal(activeSockets.size, 0);
+      await requestClosed;
+    } finally {
+      req.destroy();
+      agent.destroy();
+    }
+  });
+});
+
 test("node CONNECT agent detaches its parser before destination TLS", async () => {
   const netMutable = net as unknown as { connect: (...args: unknown[]) => net.Socket };
   const tlsMutable = tls as unknown as { connect: (...args: unknown[]) => tls.TLSSocket };
