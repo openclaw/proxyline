@@ -1723,6 +1723,94 @@ test("CONNECT helper trusts an HTTPS proxy endpoint with scoped CA", async () =>
   }
 });
 
+test("CONNECT helper sends proxy authorization from proxy URL credentials", async () => {
+  const requiredProxyAuthorization = `Basic ${Buffer.from("user:secret").toString("base64")}`;
+  const lab = await startProxyLab({ requiredProxyAuthorization });
+  const target = new URL(lab.targetUrl);
+  const proxyUrl = new URL(lab.proxyUrl);
+  proxyUrl.username = "user";
+  proxyUrl.password = "secret";
+  const socket = await openProxyConnectTunnel({
+    proxyUrl,
+    targetHost: target.hostname,
+    targetPort: Number(target.port),
+    timeoutMs: 1_000,
+  });
+  try {
+    socket.end();
+    assert.ok(lab.events.some((event) => event.type === "connect"));
+    assert.ok(
+      !lab.events.some(
+        (event) =>
+          event.type === "error" &&
+          event.message === "missing or invalid proxy authorization",
+      ),
+    );
+  } finally {
+    socket.destroy();
+    await lab.close();
+  }
+});
+
+test("CONNECT helper rejects non-2xx proxy responses", async () => {
+  await withConnectRecorder(async (proxyUrl) => {
+    await assert.rejects(
+      openProxyConnectTunnel({
+        proxyUrl,
+        targetHost: "api.example.com",
+        targetPort: 443,
+        timeoutMs: 1_000,
+      }),
+      /HTTP\/1\.1 403 Forbidden/,
+    );
+  });
+});
+
+test("CONNECT helper times out stalled proxy responses", async () => {
+  await withStalledConnectProxy(async (proxyUrl) => {
+    await assert.rejects(
+      openProxyConnectTunnel({
+        proxyUrl,
+        targetHost: "api.example.com",
+        targetPort: 443,
+        timeoutMs: 20,
+      }),
+      /timed out/,
+    );
+  });
+});
+
+test("CONNECT helper rejects proxy close before response", async () => {
+  const proxy = http.createServer();
+  proxy.on("connect", (_req, socket) => {
+    socket.end();
+  });
+  proxy.listen(0, "127.0.0.1");
+  await once(proxy, "listening");
+  const address = proxy.address() as AddressInfo;
+  try {
+    await assert.rejects(
+      openProxyConnectTunnel({
+        proxyUrl: `http://127.0.0.1:${address.port}`,
+        targetHost: "api.example.com",
+        targetPort: 443,
+        timeoutMs: 1_000,
+      }),
+      /closed before CONNECT response/,
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      proxy.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+  }
+});
+
 test("CONNECT helper opens an explicit tunnel through the lab proxy", async () => {
   const lab = await startProxyLab();
   const target = new URL(lab.targetUrl);

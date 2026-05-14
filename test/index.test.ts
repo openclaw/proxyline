@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
+import type { Dispatcher } from "undici";
 import {
   createAmbientNodeProxyAgent,
   hasAmbientNodeProxyConfigured,
@@ -46,6 +47,26 @@ function withProxyEnv<T>(env: Record<string, string | undefined>, run: () => T):
       }
     }
   }
+}
+
+const dispatchOptions = {
+  method: "GET",
+  origin: "http://api.example.com",
+  path: "/",
+} satisfies Dispatcher.DispatchOptions;
+
+function closedDispatchHandler(onError?: (error: Error) => void): Dispatcher.DispatchHandler {
+  return {
+    onConnect() {},
+    onData() {
+      return true;
+    },
+    onComplete() {},
+    ...(onError !== undefined ? { onError } : {}),
+    onHeaders() {
+      return true;
+    },
+  };
 }
 
 test("managed mode requires an explicit proxy URL", () => {
@@ -116,6 +137,52 @@ test("managed mode explains bypass policy matches as direct", () => {
   }
 });
 
+test("managed undici helper close and destroy callbacks mark dispatchers closed", async () => {
+  const proxy = installGlobalProxy({
+    mode: "managed",
+    proxyUrl: "http://127.0.0.1:9",
+  });
+  try {
+    const closedDispatcher = proxy.createUndiciDispatcher();
+    await new Promise<void>((resolve) => {
+      closedDispatcher.close(resolve);
+    });
+
+    assert.throws(() => closedDispatcher.dispatch(dispatchOptions, closedDispatchHandler()));
+    let closedError: Error | undefined;
+    assert.equal(
+      closedDispatcher.dispatch(
+        dispatchOptions,
+        closedDispatchHandler((error) => {
+          closedError = error;
+        }),
+      ),
+      false,
+    );
+    assert.ok(closedError);
+
+    const destroyedDispatcher = proxy.createUndiciDispatcher();
+    const destroyedCause = new Error("destroyed by test");
+    await new Promise<void>((resolve) => {
+      destroyedDispatcher.destroy(destroyedCause, resolve);
+    });
+
+    let destroyedError: Error | undefined;
+    assert.equal(
+      destroyedDispatcher.dispatch(
+        dispatchOptions,
+        closedDispatchHandler((error) => {
+          destroyedError = error;
+        }),
+      ),
+      false,
+    );
+    assert.equal(destroyedError, destroyedCause);
+  } finally {
+    proxy.stop();
+  }
+});
+
 test("ambient mode can be inactive and explain direct routing", () => {
   const proxy = installProxyline({ mode: "ambient" });
 
@@ -124,6 +191,51 @@ test("ambient mode can be inactive and explain direct routing", () => {
   assert.equal(proxy.active, false);
   assert.equal(decision.kind, "direct");
   assert.equal(decision.reason, "ambient-proxy-not-configured");
+});
+
+test("ambient undici helper close and destroy callbacks mark dispatchers closed", async () => {
+  const proxy = withProxyEnv({ HTTP_PROXY: "http://127.0.0.1:9" }, () =>
+    installGlobalProxy({ mode: "ambient" }),
+  );
+  try {
+    const closedDispatcher = proxy.createUndiciDispatcher();
+    await new Promise<void>((resolve) => {
+      closedDispatcher.close(resolve);
+    });
+
+    assert.throws(() => closedDispatcher.dispatch(dispatchOptions, closedDispatchHandler()));
+    let closedError: Error | undefined;
+    assert.equal(
+      closedDispatcher.dispatch(
+        dispatchOptions,
+        closedDispatchHandler((error) => {
+          closedError = error;
+        }),
+      ),
+      false,
+    );
+    assert.ok(closedError);
+
+    const destroyedDispatcher = proxy.createUndiciDispatcher();
+    const destroyedCause = new Error("destroyed by test");
+    await new Promise<void>((resolve) => {
+      destroyedDispatcher.destroy(destroyedCause, resolve);
+    });
+
+    let destroyedError: Error | undefined;
+    assert.equal(
+      destroyedDispatcher.dispatch(
+        dispatchOptions,
+        closedDispatchHandler((error) => {
+          destroyedError = error;
+        }),
+      ),
+      false,
+    );
+    assert.equal(destroyedError, destroyedCause);
+  } finally {
+    proxy.stop();
+  }
 });
 
 test("ambient mode ignores explicit proxyUrl", () => {
@@ -234,6 +346,15 @@ test("ambient Node proxy configured helper honors protocol and no-proxy", () => 
   assert.equal(bypassed, false);
 });
 
+test("ambient Node proxy configured helper honors wildcard no-proxy", () => {
+  const bypassed = withProxyEnv(
+    { HTTPS_PROXY: "http://proxy.example:8080", NO_PROXY: "*" },
+    () => hasAmbientNodeProxyConfigured({ protocol: "https" }),
+  );
+
+  assert.equal(bypassed, false);
+});
+
 test("ambient Node proxy helper uses the provided env snapshot for routing", () => {
   const agent = withProxyEnv({}, () =>
     createAmbientNodeProxyAgent({
@@ -314,6 +435,11 @@ test("CONNECT authority formatting rejects unsafe hosts and brackets IPv6", () =
   assert.equal(formatConnectAuthority("::1", 443), "[::1]:443");
   assert.equal(formatConnectAuthority("[::1]", 443), "[::1]:443");
   assert.throws(
+    () => formatConnectAuthority("", 443),
+    (error: unknown) =>
+      error instanceof ProxylineError && error.code === "INVALID_CONNECT_TARGET",
+  );
+  assert.throws(
     () => formatConnectAuthority("api.example.com\r\nProxy-Authorization: injected", 443),
     (error: unknown) =>
       error instanceof ProxylineError && error.code === "INVALID_CONNECT_TARGET",
@@ -323,7 +449,14 @@ test("CONNECT authority formatting rejects unsafe hosts and brackets IPv6", () =
     (error: unknown) =>
       error instanceof ProxylineError && error.code === "INVALID_CONNECT_TARGET",
   );
+  assert.throws(
+    () => formatConnectAuthority("api.example.com", 65_536),
+    (error: unknown) =>
+      error instanceof ProxylineError && error.code === "INVALID_CONNECT_TARGET",
+  );
   for (const unsafeHost of [
+    "[api.example.com",
+    "api.example.com]",
     "api.example.com:443",
     "api.example.com/path",
     "user@api.example.com",

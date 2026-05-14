@@ -2,10 +2,11 @@
 
 ## Unreleased
 
+## 0.2.0 - 2026-05-14
+
 - Added ambient Node proxy helper exports and replaced the `proxy-agent` dependency with Proxyline's scoped HTTP/HTTPS Node agent.
-
-## 0.1.1 - 2026-05-12
-
+- Added a native Node coverage command and `pnpm check` coverage gates for source lines, branches, and functions.
+- Expanded CI to run the coverage-gated check across Ubuntu, macOS, and Windows on Node 20.18.1, 22, 24, and 26.
 - Hardened ambient proxy routing, CONNECT target validation, undici dispatcher cleanup, and generated package output after the runtime module split.
 - Added managed-mode `bypassPolicy` support so trusted callers can intentionally route selected loopback/control-plane traffic directly while keeping the rest of managed traffic proxied.
 - Stopped versioning generated `dist/` output in git; release and package dry-run flows now build `dist/` during `prepack` and still publish generated JavaScript, declarations, and declaration maps.

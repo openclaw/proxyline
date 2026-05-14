@@ -9,10 +9,13 @@ The lab lives in `test/support/proxy-lab.ts`. It is not exported from the packag
 ```bash
 pnpm check       # typecheck + test
 pnpm test        # build + unit, integration, and package-entrypoint tests
+pnpm coverage    # build + tests with native Node source coverage
 pnpm typecheck   # type-only
 ```
 
 `pnpm test` builds `dist/`, then runs `node --test` via `tsx` against `test/index.test.ts` (unit), `test/e2e.test.ts` (integration), and `test/package.test.ts` (package entrypoint).
+`pnpm check` enforces native Node coverage for `src/**/*.ts` with thresholds of 85% lines, 80% branches, and 80% functions.
+CI runs that coverage-gated check on Ubuntu, macOS, and Windows across Node 20.18.1, 22, 24, and 26.
 
 ## What the lab covers
 

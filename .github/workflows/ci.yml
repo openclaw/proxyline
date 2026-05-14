@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint-workflows:
     name: Lint workflows
@@ -23,14 +27,14 @@ jobs:
         uses: rhysd/actionlint@914e7df21a07ef503a81201c76d2b11c789d3fca # v1.7.12
 
   test:
-    name: Node ${{ matrix.node }} check (${{ matrix.os }})
+    name: Node ${{ matrix.node }} coverage check (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         node:
-          - 20
+          - 20.18.1
           - 22
           - 24
           - 26
@@ -58,5 +62,5 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Check
+      - name: Coverage-gated check
         run: pnpm check
