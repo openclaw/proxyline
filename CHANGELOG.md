@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Documented managed-mode `bypassPolicy` and clarified coverage-gated CI behavior.
+- Added OpenClaw Foundation to the MIT license copyright notice.
 
 ## 0.2.0 - 2026-05-14
 
