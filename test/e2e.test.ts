@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import http from "node:http";
 import https from "node:https";
-import { type AddressInfo } from "node:net";
-import { type Duplex } from "node:stream";
+import net, { type AddressInfo } from "node:net";
+import { Duplex } from "node:stream";
+import tls from "node:tls";
 import { URL } from "node:url";
 import test from "node:test";
 import { Dispatcher, fetch } from "undici";
@@ -194,6 +195,31 @@ async function withStalledConnectProxy<T>(
   }
 }
 
+class FakeProxySocket extends Duplex {
+  public override _read(): void {}
+
+  public override _write(chunk: Buffer, _encoding: BufferEncoding, callback: (error?: Error | null) => void): void {
+    if (chunk.toString("latin1").startsWith("CONNECT ")) {
+      queueMicrotask(() => {
+        this.emit("data", Buffer.from("HTTP/1.1 200 Connection Established\r\n\r\n"));
+      });
+    }
+    callback();
+  }
+
+  public setNoDelay(): this {
+    return this;
+  }
+
+  public setKeepAlive(): this {
+    return this;
+  }
+
+  public setTimeout(): this {
+    return this;
+  }
+}
+
 test("ambient mode routes node:http through HTTP_PROXY", async () => {
   const lab = await startProxyLab();
   const proxy = withProxyEnv({ HTTP_PROXY: lab.proxyUrl }, () =>
@@ -352,6 +378,30 @@ test("node helper agents infer default HTTPS ports with stack traces disabled", 
   });
 });
 
+test("node helper agents infer default HTTPS ports with non-number stack trace limits", async () => {
+  await withConnectRecorder(async (proxyUrl, authorities) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
+    };
+    const agent = createNodeProxyAgent(resolver, undefined);
+    const errorConstructor = Error as unknown as { stackTraceLimit: unknown };
+    const originalStackTraceLimit = errorConstructor.stackTraceLimit;
+    errorConstructor.stackTraceLimit = undefined;
+    try {
+      await assert.rejects(readHttps("https://example.test/allowed", { agent, timeout: 1_000 }));
+      assert.deepEqual(authorities, ["example.test:443"]);
+    } finally {
+      errorConstructor.stackTraceLimit = originalStackTraceLimit;
+      agent.destroy();
+    }
+  });
+});
+
 test("node helper agents infer default HTTPS ports with custom stack formatters", async () => {
   await withConnectRecorder(async (proxyUrl, authorities) => {
     const resolver: ProxyResolver = {
@@ -420,6 +470,62 @@ test("managed mode honors req.setTimeout during stalled node:https CONNECT hands
       proxy.stop();
     }
   });
+});
+
+test("node CONNECT agent detaches its parser before destination TLS", async () => {
+  const netMutable = net as unknown as { connect: (...args: unknown[]) => net.Socket };
+  const tlsMutable = tls as unknown as { connect: (...args: unknown[]) => tls.TLSSocket };
+  const originalNetConnect = netMutable.connect;
+  const originalTlsConnect = tlsMutable.connect;
+  let proxySocket: FakeProxySocket | undefined;
+  let tlsConnects = 0;
+  const resolver: ProxyResolver = {
+    active: true,
+    describeProxy: () => "http://proxy.example:8080/",
+    explain: () => {
+      throw new Error("not used");
+    },
+    getProxyForUrl: () => "http://proxy.example:8080/",
+  };
+  const agent = createNodeProxyAgent(resolver, undefined, "https");
+  try {
+    netMutable.connect = () => {
+      proxySocket = new FakeProxySocket();
+      queueMicrotask(() => proxySocket?.emit("connect"));
+      return proxySocket as unknown as net.Socket;
+    };
+    tlsMutable.connect = (...args: unknown[]) => {
+      tlsConnects += 1;
+      const callback = args.find((arg): arg is () => void => typeof arg === "function");
+      const socket = new FakeProxySocket() as unknown as tls.TLSSocket;
+      queueMicrotask(() => {
+        socket.emit("secureConnect");
+        callback?.();
+      });
+      return socket;
+    };
+
+    await new Promise<void>((resolve, reject) => {
+      const req = https.get("https://example.test/", { agent, timeout: 1_000 }, () => {});
+      req.on("error", reject);
+      req.on("socket", () => {
+        proxySocket?.emit("data", Buffer.from("encrypted target bytes"));
+        setImmediate(() => {
+          try {
+            assert.equal(tlsConnects, 1);
+            req.destroy();
+            resolve();
+          } catch (error) {
+            reject(error);
+          }
+        });
+      });
+    });
+  } finally {
+    netMutable.connect = originalNetConnect;
+    tlsMutable.connect = originalTlsConnect;
+    agent.destroy();
+  }
 });
 
 test("ambient Node proxy helper trusts HTTPS proxy endpoints with scoped proxy TLS", async () => {

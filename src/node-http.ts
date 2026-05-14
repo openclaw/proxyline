@@ -477,18 +477,22 @@ class ProxylineConnectAgent extends http.Agent {
       hookedRequestSetTimeout = undefined;
     };
 
-    const cleanup = (): void => {
-      if (pendingTimeout !== undefined) {
-        clearTimeout(pendingTimeout);
-        pendingTimeout = undefined;
-      }
-      restoreRequestTimeoutHook();
+    const cleanupProxyHandshakeListeners = (): void => {
       proxySocket.off("data", onData);
       proxySocket.off("error", onError);
       proxySocket.off("end", onClosed);
       proxySocket.off("close", onClosed);
       proxySocket.off("connect", onConnected);
       proxySocket.off("secureConnect", onConnected);
+    };
+
+    const cleanup = (): void => {
+      if (pendingTimeout !== undefined) {
+        clearTimeout(pendingTimeout);
+        pendingTimeout = undefined;
+      }
+      restoreRequestTimeoutHook();
+      cleanupProxyHandshakeListeners();
       request?.off("abort", onRequestClosed);
       request?.off("close", onRequestClosed);
       request?.off("error", onRequestClosed);
@@ -554,6 +558,7 @@ class ProxylineConnectAgent extends http.Agent {
         return;
       }
       const tunneledBytes = responseBuffer.subarray(bodyOffset);
+      cleanupProxyHandshakeListeners();
       if (tunneledBytes.length > 0) {
         proxySocket.unshift(tunneledBytes);
       }
@@ -675,7 +680,7 @@ export class ProxylineNodeProxyAgent extends http.Agent {
     const originalStackTraceLimit = Error.stackTraceLimit;
     const errorConstructor = Error as unknown as { prepareStackTrace?: unknown };
     const originalPrepareStackTrace = errorConstructor.prepareStackTrace;
-    if (typeof originalStackTraceLimit === "number" && originalStackTraceLimit < 20) {
+    if (typeof originalStackTraceLimit !== "number" || originalStackTraceLimit < 20) {
       // Node reads agent.protocol/defaultPort before addRequest, so this is the only caller signal.
       Error.stackTraceLimit = 20;
     }
