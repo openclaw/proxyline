@@ -40,6 +40,7 @@ type NodeProxyAgentOptions = NodeAgentOptions & {
 };
 
 const MAX_CONNECT_RESPONSE_HEADER_BYTES = 16 * 1024;
+const INVALID_PROXY_TARGET_HOST_DELIMITER_PATTERN = /[/:?#@\\]/;
 const nodeAgentDefaultPorts = new WeakMap<object, number>();
 
 export const CALLER_AGENT_TLS_OPTION_KEYS = [
@@ -260,16 +261,20 @@ function requestAuthority(options: NodeAgentRequestOptions): string {
   return port === undefined ? authorityHost : `${authorityHost}:${port}`;
 }
 
-function requestUrl(
+function requestDestinationUrl(
   req: http.ClientRequest,
   options: NodeAgentRequestOptions,
   stackProtocol: "http" | "https" | undefined,
 ): string {
-  if (!shouldTunnelRequest(req, options, stackProtocol) && /^(?:https?|wss?):\/\//i.test(req.path)) {
-    return new URL(req.path).href;
-  }
   const path = req.path.startsWith("/") ? req.path : `/${req.path}`;
   return `${requestProtocol(req, options, stackProtocol)}//${requestAuthority(options)}${path}`;
+}
+
+function proxyForwardRequestPath(req: http.ClientRequest, options: NodeAgentRequestOptions): string {
+  if (/^(?:https?|wss?):\/\//i.test(req.path)) {
+    return new URL(req.path).href;
+  }
+  return requestDestinationUrl(req, options, undefined);
 }
 
 function setProxyRequestHeaders(req: http.ClientRequest, proxy: URL, keepAlive: boolean): void {
@@ -287,7 +292,7 @@ function setForwardProxyRequestPath(
   options: NodeAgentRequestOptions,
 ): void {
   req._header = null;
-  req.path = requestUrl(req, options, undefined);
+  req.path = proxyForwardRequestPath(req, options);
 }
 
 function connectToProxy(
@@ -349,6 +354,9 @@ function normalizeProxyTargetHost(host: string): string {
     host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
   if (net.isIP(unbracketedHost) !== 0) {
     return unbracketedHost;
+  }
+  if (INVALID_PROXY_TARGET_HOST_DELIMITER_PATTERN.test(host)) {
+    throw new ProxylineError("INVALID_CONNECT_TARGET", "CONNECT target host contains unsafe delimiters.");
   }
   const asciiHost = domainToASCII(host);
   if (!asciiHost) {
@@ -771,7 +779,7 @@ export class ProxylineNodeProxyAgent extends http.Agent {
       stackProtocol === "https" && options.secureEndpoint !== true
         ? { ...options, secureEndpoint: true }
         : options;
-    const url = requestUrl(req, agentOptions, stackProtocol);
+    const url = requestDestinationUrl(req, agentOptions, stackProtocol);
     const proxy = this.#getProxyForUrl(url, req);
     if (!proxy) {
       (isSecureEndpoint(agentOptions, stackProtocol) ? this.#httpsAgent : this.#httpAgent)

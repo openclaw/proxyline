@@ -294,9 +294,9 @@ test("managed mode preserves origin-form paths that start with double slash", as
   }
 });
 
-test("ambient mode preserves absolute-form HTTPS request paths on node:http", async () => {
+test("ambient mode preserves absolute-form HTTPS request paths on proxied node:http", async () => {
   const lab = await startProxyLab();
-  const proxy = withProxyEnv({ HTTPS_PROXY: lab.proxyUrl }, () =>
+  const proxy = withProxyEnv({ HTTP_PROXY: lab.proxyUrl }, () =>
     installGlobalProxy({ mode: "ambient" }),
   );
   try {
@@ -318,6 +318,28 @@ test("ambient mode preserves absolute-form HTTPS request paths on node:http", as
         (event) => event.type === "request" && event.url.includes("http://api.example.testhttps://"),
       ),
     );
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
+test("managed mode evaluates absolute-form node:http proxy policy against the socket destination", async () => {
+  const lab = await startProxyLab();
+  const proxy = installGlobalProxy({
+    mode: "managed",
+    proxyUrl: lab.proxyUrl,
+    bypassPolicy: ({ url }) => new URL(url).hostname === "localhost",
+  });
+  try {
+    const response = await readHttpOptions({
+      hostname: "evil.example",
+      path: "http://localhost/denied",
+      protocol: "http:",
+    });
+
+    assert.equal(response.status, 403);
+    assert.ok(lab.events.some((event) => event.type === "deny" && event.url === "http://localhost/denied"));
   } finally {
     proxy.stop();
     await lab.close();
@@ -400,6 +422,35 @@ test("node CONNECT agents reject unsafe object-form HTTPS hosts before proxying"
           agent,
           headers: { host: "safe.example" },
           hostname: "evil.example\r\nProxy-Authorization: injected",
+          path: "/allowed",
+          timeout: 1_000,
+        }),
+        (error: unknown) =>
+          error instanceof ProxylineError && error.code === "INVALID_CONNECT_TARGET",
+      );
+      assert.deepEqual(authorities, []);
+    } finally {
+      agent.destroy();
+    }
+  });
+});
+
+test("node CONNECT agents reject delimiter-truncated object-form HTTPS hosts", async () => {
+  await withConnectRecorder(async (proxyUrl, authorities) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
+    };
+    const agent = createNodeProxyAgent(resolver, undefined);
+    try {
+      await assert.rejects(
+        readHttpsOptions({
+          agent,
+          hostname: "evil.example/path",
           path: "/allowed",
           timeout: 1_000,
         }),
