@@ -1,7 +1,13 @@
 import http from "node:http";
 import https from "node:https";
 import net from "node:net";
-import { ProxyAgent as NodeProxyAgent } from "proxy-agent";
+import tls from "node:tls";
+import {
+  readProxyEnv,
+  resolveAmbientProxyForUrl,
+  type ProxyEnvSnapshot,
+} from "./env.js";
+import { ProxylineError, resolveProxyTlsCa, type ProxylineTlsOptions } from "./shared.js";
 import type { ProxyResolver } from "./types.js";
 
 export type NodeHttpRequestOptions = http.RequestOptions & https.RequestOptions & {
@@ -11,9 +17,22 @@ export type NodeHttpRequestOptions = http.RequestOptions & https.RequestOptions 
 type NodeHttpMethod = typeof http.request;
 type NodeAgentFactory = (options: NodeHttpRequestOptions) => http.Agent;
 type NodeAgentOptions = http.AgentOptions & https.AgentOptions;
+type NodeAgentRequestOptions = http.RequestOptions & https.RequestOptions & {
+  secureEndpoint?: boolean;
+};
+type NodeAddRequestAgent = http.Agent & {
+  addRequest(req: http.ClientRequest, options: NodeAgentRequestOptions): void;
+};
 type NodeAgentWithOptions = http.Agent & {
   options?: NodeAgentOptions;
 };
+type NodeProxyAgentOptions = NodeAgentOptions & {
+  getProxyForUrl: (url: string, request?: http.ClientRequest) => string;
+  proxyTls?: ProxylineTlsOptions;
+};
+
+const MAX_CONNECT_RESPONSE_HEADER_BYTES = 16 * 1024;
+const nodeAgentDefaultPorts = new WeakMap<object, number>();
 
 export const CALLER_AGENT_TLS_OPTION_KEYS = [
   "ca",
@@ -146,22 +165,456 @@ export function bindNodeHttpMethod<TMethod extends NodeHttpMethod>(
   }) as TMethod;
 }
 
+function proxyHost(proxy: URL): string {
+  return (proxy.hostname || proxy.host).replace(/^\[|\]$/g, "");
+}
+
+function proxyPort(proxy: URL): number {
+  if (proxy.port) {
+    return Number(proxy.port);
+  }
+  return proxy.protocol === "https:" ? 443 : 80;
+}
+
+function proxyAuthorization(proxy: URL): string | undefined {
+  if (!proxy.username && !proxy.password) {
+    return undefined;
+  }
+  const username = decodeURIComponent(proxy.username);
+  const password = decodeURIComponent(proxy.password);
+  return `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
+}
+
+function proxyConnectOptions(
+  proxy: URL,
+  proxyTls: ProxylineTlsOptions | undefined,
+): net.TcpNetConnectOpts | tls.ConnectionOptions {
+  const host = proxyHost(proxy);
+  const base = {
+    host,
+    port: proxyPort(proxy),
+  };
+  if (proxy.protocol !== "https:") {
+    return base;
+  }
+  const ca = resolveProxyTlsCa(proxyTls);
+  return {
+    ...base,
+    ALPNProtocols: ["http/1.1"],
+    ...(net.isIP(host) === 0 ? { servername: host } : {}),
+    ...(ca !== undefined ? { ca } : {}),
+  };
+}
+
+function assertSupportedNodeProxyProtocol(proxy: URL): void {
+  if (proxy.protocol !== "http:" && proxy.protocol !== "https:") {
+    throw new ProxylineError(
+      "UNSUPPORTED_PROXY_PROTOCOL",
+      `Node HTTP agents support http:// and https:// proxy endpoints: ${proxy.protocol}`,
+    );
+  }
+}
+
+function requestProtocol(req: http.ClientRequest, options: NodeAgentRequestOptions): string {
+  const isWebSocket = isWebSocketRequest(req);
+  if (isSecureEndpoint(options)) {
+    return isWebSocket ? "wss:" : "https:";
+  }
+  return isWebSocket ? "ws:" : "http:";
+}
+
+function requestUrl(req: http.ClientRequest, options: NodeAgentRequestOptions): string {
+  const host = req.getHeader("host") ?? options.host ?? options.hostname ?? "localhost";
+  return new URL(req.path, `${requestProtocol(req, options)}//${String(host)}`).href;
+}
+
+function setProxyRequestHeaders(req: http.ClientRequest, proxy: URL, keepAlive: boolean): void {
+  const authorization = proxyAuthorization(proxy);
+  if (authorization !== undefined) {
+    req.setHeader("Proxy-Authorization", authorization);
+  }
+  if (!req.hasHeader("Proxy-Connection")) {
+    req.setHeader("Proxy-Connection", keepAlive ? "Keep-Alive" : "close");
+  }
+}
+
+function setForwardProxyRequestPath(
+  req: http.ClientRequest & { _header?: string | null },
+  options: NodeAgentRequestOptions,
+): void {
+  req._header = null;
+  req.path = requestUrl(req, options);
+}
+
+function connectToProxy(
+  proxy: URL,
+  proxyTls: ProxylineTlsOptions | undefined,
+): net.Socket | tls.TLSSocket {
+  const options = proxyConnectOptions(proxy, proxyTls);
+  return proxy.protocol === "https:"
+    ? tls.connect(options as tls.ConnectionOptions)
+    : net.connect(options as net.NetConnectOpts);
+}
+
+function isWebSocketRequest(req: http.ClientRequest): boolean {
+  return String(req.getHeader("upgrade") ?? "").toLowerCase() === "websocket";
+}
+
+function isSecureEndpoint(options: NodeAgentRequestOptions): boolean {
+  return (
+    options.secureEndpoint === true ||
+    options.protocol === "https:" ||
+    options.protocol === "wss:" ||
+    options.defaultPort === 443
+  );
+}
+
+function shouldTunnelRequest(req: http.ClientRequest, options: NodeAgentRequestOptions): boolean {
+  return isSecureEndpoint(options) || isWebSocketRequest(req);
+}
+
+function splitHostPort(value: string): { host: string; port?: number } {
+  const bracketed = value.match(/^\[([^\]]+)\](?::(\d+))?$/);
+  if (bracketed) {
+    return {
+      host: bracketed[1] ?? "",
+      ...(bracketed[2] !== undefined ? { port: Number(bracketed[2]) } : {}),
+    };
+  }
+  const lastColon = value.lastIndexOf(":");
+  const hasSingleColon = lastColon !== -1 && value.indexOf(":") === lastColon;
+  if (hasSingleColon) {
+    const possiblePort = value.slice(lastColon + 1);
+    if (/^\d+$/.test(possiblePort)) {
+      return { host: value.slice(0, lastColon), port: Number(possiblePort) };
+    }
+  }
+  return { host: value };
+}
+
+function connectTarget(options: NodeAgentRequestOptions): { host: string; port: number } {
+  const rawHost = options.hostname ?? options.host;
+  if (typeof rawHost !== "string") {
+    throw new ProxylineError("INVALID_CONNECT_TARGET", "CONNECT target is missing host.");
+  }
+  const parsed = splitHostPort(rawHost);
+  const port = parsed.port ?? Number(options.port);
+  if (!parsed.host || !Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new ProxylineError("INVALID_CONNECT_TARGET", "CONNECT target is missing host or port.");
+  }
+  return { host: parsed.host, port };
+}
+
+function destinationTlsConnectOptions(
+  options: NodeAgentRequestOptions,
+  socket: net.Socket,
+): tls.ConnectionOptions {
+  const target = connectTarget(options);
+  const tlsOptions = { ...options, socket } as tls.ConnectionOptions & Record<string, unknown>;
+  tlsOptions.host = target.host;
+  delete tlsOptions.path;
+  delete tlsOptions.port;
+  delete tlsOptions.secureEndpoint;
+  delete tlsOptions.agent;
+  return tlsOptions;
+}
+
+class ProxylineHttpForwardAgent extends http.Agent {
+  public readonly options: NodeAgentOptions;
+  readonly #keepAlive: boolean;
+  readonly #proxy: URL;
+  readonly #proxyTls: ProxylineTlsOptions | undefined;
+
+  public constructor(proxy: URL, options: NodeAgentOptions, proxyTls: ProxylineTlsOptions | undefined) {
+    super(options);
+    this.options = options;
+    this.#keepAlive = options.keepAlive === true;
+    this.#proxy = proxy;
+    this.#proxyTls = proxyTls;
+  }
+
+  public addRequest(req: http.ClientRequest, options: NodeAgentRequestOptions): void {
+    setForwardProxyRequestPath(req as http.ClientRequest & { _header?: string | null }, options);
+    setProxyRequestHeaders(req, this.#proxy, this.#keepAlive);
+    (http.Agent.prototype as unknown as NodeAddRequestAgent).addRequest.call(this, req, options);
+  }
+
+  public override createConnection(
+    _options: NodeAgentRequestOptions,
+    callback?: (error: Error | null, socket: net.Socket) => void,
+  ): net.Socket {
+    const socket = connectToProxy(this.#proxy, this.#proxyTls);
+    if (callback !== undefined) {
+      const onError = (error: Error): void => {
+        callback(error, socket);
+      };
+      const onConnected = (): void => {
+        socket.off("error", onError);
+        callback(null, socket);
+      };
+      socket.once(this.#proxy.protocol === "https:" ? "secureConnect" : "connect", onConnected);
+      socket.once("error", onError);
+    }
+    return socket;
+  }
+}
+
+class ProxylineConnectAgent extends http.Agent {
+  public readonly options: NodeAgentOptions;
+  readonly #keepAlive: boolean;
+  readonly #proxy: URL;
+  readonly #proxyTls: ProxylineTlsOptions | undefined;
+
+  public constructor(proxy: URL, options: NodeAgentOptions, proxyTls: ProxylineTlsOptions | undefined) {
+    super(options);
+    this.options = options;
+    this.#keepAlive = options.keepAlive === true;
+    this.#proxy = proxy;
+    this.#proxyTls = proxyTls;
+  }
+
+  public addRequest(req: http.ClientRequest, options: NodeAgentRequestOptions): void {
+    (http.Agent.prototype as unknown as NodeAddRequestAgent).addRequest.call(this, req, options);
+  }
+
+  public override createConnection(
+    options: NodeAgentRequestOptions,
+    callback?: (error: Error | null, socket: net.Socket) => void,
+  ): net.Socket {
+    const proxySocket = connectToProxy(this.#proxy, this.#proxyTls);
+    if (callback === undefined) {
+      proxySocket.destroy();
+      throw new ProxylineError("INVALID_CONNECT_CALLBACK", "CONNECT agents require an async socket callback.");
+    }
+
+    let settled = false;
+    let responseBuffer = Buffer.alloc(0);
+
+    const cleanup = (): void => {
+      proxySocket.off("data", onData);
+      proxySocket.off("error", onError);
+      proxySocket.off("end", onClosed);
+      proxySocket.off("close", onClosed);
+      proxySocket.off("connect", onConnected);
+      proxySocket.off("secureConnect", onConnected);
+    };
+
+    const finish = (error: Error | null, socket: net.Socket): void => {
+      if (settled) {
+        if (error === null) {
+          socket.destroy();
+        }
+        return;
+      }
+      settled = true;
+      cleanup();
+      callback(error, socket);
+    };
+
+    const fail = (error: Error): void => {
+      proxySocket.destroy();
+      finish(error, proxySocket);
+    };
+
+    const onConnected = (): void => {
+      let target: { host: string; port: number };
+      try {
+        target = connectTarget(options);
+      } catch (error) {
+        fail(error instanceof Error ? error : new Error(String(error)));
+        return;
+      }
+      const { host, port } = target;
+      const authority = net.isIPv6(host) ? `[${host}]:${port}` : `${host}:${port}`;
+      const headers = [
+        `CONNECT ${authority} HTTP/1.1`,
+        `Host: ${authority}`,
+        `Proxy-Connection: ${this.#keepAlive ? "Keep-Alive" : "close"}`,
+      ];
+      const authorization = proxyAuthorization(this.#proxy);
+      if (authorization !== undefined) {
+        headers.push(`Proxy-Authorization: ${authorization}`);
+      }
+      proxySocket.write([...headers, "", ""].join("\r\n"));
+    };
+
+    const onData = (chunk: Buffer): void => {
+      responseBuffer = Buffer.concat([responseBuffer, chunk]);
+      const headerEnd = responseBuffer.indexOf("\r\n\r\n");
+      if (headerEnd === -1) {
+        if (responseBuffer.length > MAX_CONNECT_RESPONSE_HEADER_BYTES) {
+          fail(new ProxylineError("CONNECT_FAILED", "proxy CONNECT response headers were too large"));
+        }
+        return;
+      }
+      const bodyOffset = headerEnd + 4;
+      if (bodyOffset > MAX_CONNECT_RESPONSE_HEADER_BYTES) {
+        fail(new ProxylineError("CONNECT_FAILED", "proxy CONNECT response headers were too large"));
+        return;
+      }
+      const statusLine = responseBuffer.subarray(0, bodyOffset).toString("latin1").split("\r\n", 1)[0] ?? "";
+      if (!/^HTTP\/1\.[01] 2\d\d\b/.test(statusLine)) {
+        fail(new ProxylineError("CONNECT_FAILED", statusLine || "proxy returned an invalid CONNECT response"));
+        return;
+      }
+      const tunneledBytes = responseBuffer.subarray(bodyOffset);
+      if (tunneledBytes.length > 0) {
+        proxySocket.unshift(tunneledBytes);
+      }
+      if (!isSecureEndpoint(options)) {
+        finish(null, proxySocket);
+        return;
+      }
+      const tlsSocket = tls.connect(destinationTlsConnectOptions(options, proxySocket));
+      const onTlsError = (error: Error): void => {
+        finish(error, tlsSocket);
+      };
+      const onTlsSecureConnect = (): void => {
+        tlsSocket.off("error", onTlsError);
+        finish(null, tlsSocket);
+      };
+      tlsSocket.once("secureConnect", onTlsSecureConnect);
+      tlsSocket.once("error", onTlsError);
+    };
+
+    const onError = (error: Error): void => {
+      fail(error);
+    };
+
+    const onClosed = (): void => {
+      fail(new ProxylineError("CONNECT_FAILED", "proxy socket closed before CONNECT completed"));
+    };
+
+    proxySocket.once(this.#proxy.protocol === "https:" ? "secureConnect" : "connect", onConnected);
+    proxySocket.on("data", onData);
+    proxySocket.once("error", onError);
+    proxySocket.once("end", onClosed);
+    proxySocket.once("close", onClosed);
+
+    return undefined as unknown as net.Socket;
+  }
+}
+
+export class ProxylineNodeProxyAgent extends http.Agent {
+  public readonly options: NodeAgentOptions;
+  readonly #agents = new Map<string, NodeAddRequestAgent>();
+  readonly #getProxyForUrl: (url: string, request?: http.ClientRequest) => string;
+  readonly #httpAgent: NodeAddRequestAgent;
+  readonly #httpsAgent: NodeAddRequestAgent;
+  readonly #proxyTls: ProxylineTlsOptions | undefined;
+
+  public constructor(options: NodeProxyAgentOptions) {
+    super(options);
+    this.options = options;
+    this.#getProxyForUrl = options.getProxyForUrl;
+    this.#proxyTls = options.proxyTls;
+    this.#httpAgent = new http.Agent(options) as NodeAddRequestAgent;
+    this.#httpsAgent = new https.Agent(options) as unknown as NodeAddRequestAgent;
+  }
+
+  public get defaultPort(): number {
+    return nodeAgentDefaultPorts.get(this) ?? (this.#isSecureEndpoint() ? 443 : 80);
+  }
+
+  public set defaultPort(value: number) {
+    nodeAgentDefaultPorts.set(this, value);
+  }
+
+  public get protocol(): string {
+    return this.#isSecureEndpoint() ? "https:" : "http:";
+  }
+
+  public set protocol(_value: string) {
+    // Node's http.Agent constructor assigns this, but this wrapper is dual-use.
+  }
+
+  public getProxyForUrl(url: string, request?: http.ClientRequest): string {
+    return this.#getProxyForUrl(url, request);
+  }
+
+  #isSecureEndpoint(): boolean {
+    const stack = new Error().stack;
+    if (typeof stack !== "string") {
+      return false;
+    }
+    return stack.split("\n").some((line) => line.includes("node:https:"));
+  }
+
+  public addRequest(req: http.ClientRequest, options: NodeAgentRequestOptions): void {
+    const url = requestUrl(req, options);
+    const proxy = this.#getProxyForUrl(url, req);
+    if (!proxy) {
+      (isSecureEndpoint(options) ? this.#httpsAgent : this.#httpAgent).addRequest(req, options);
+      return;
+    }
+    const proxyUrl = new URL(proxy);
+    assertSupportedNodeProxyProtocol(proxyUrl);
+    const tunnel = shouldTunnelRequest(req, options);
+    const key = `${tunnel ? "connect" : "forward"}:${proxyUrl.href}`;
+    let agent = this.#agents.get(key);
+    if (agent === undefined) {
+      const newAgent = tunnel
+        ? new ProxylineConnectAgent(proxyUrl, this.options, this.#proxyTls)
+        : new ProxylineHttpForwardAgent(proxyUrl, this.options, this.#proxyTls);
+      agent = newAgent;
+      this.#agents.set(key, agent);
+    }
+    agent.addRequest(req, options);
+  }
+
+  public override destroy(): void {
+    for (const agent of this.#agents.values()) {
+      agent.destroy();
+    }
+    this.#agents.clear();
+    this.#httpAgent.destroy();
+    this.#httpsAgent.destroy();
+    super.destroy();
+  }
+}
+
 export function createNodeProxyAgent(
   resolver: ProxyResolver,
   proxyCa: string | undefined,
-): NodeProxyAgent {
-  return new NodeProxyAgent({
-    ...(proxyCa !== undefined ? { ca: proxyCa } : {}),
+): ProxylineNodeProxyAgent {
+  return new ProxylineNodeProxyAgent({
     getProxyForUrl: resolver.getProxyForUrl,
-    httpAgent: new http.Agent(),
-    httpsAgent: new https.Agent(),
+    ...(proxyCa !== undefined ? { proxyTls: { ca: proxyCa } } : {}),
   });
 }
 
-export function createDirectNodeAgent(): NodeProxyAgent {
-  return new NodeProxyAgent({
+export function createDirectNodeAgent(): ProxylineNodeProxyAgent {
+  return new ProxylineNodeProxyAgent({
     getProxyForUrl: () => "",
-    httpAgent: new http.Agent(),
-    httpsAgent: new https.Agent(),
+  });
+}
+
+export type AmbientNodeProxyAgentOptions = {
+  env?: ProxyEnvSnapshot;
+  protocol?: "http" | "https";
+};
+
+function ambientProbeUrl(protocol: "http" | "https"): string {
+  return `${protocol}://proxyline.invalid/`;
+}
+
+export function hasAmbientNodeProxyConfigured(
+  options: AmbientNodeProxyAgentOptions = {},
+): boolean {
+  const env = options.env ?? readProxyEnv();
+  const protocol = options.protocol ?? "https";
+  return resolveAmbientProxyForUrl(ambientProbeUrl(protocol), env) !== undefined;
+}
+
+export function createAmbientNodeProxyAgent(
+  options: AmbientNodeProxyAgentOptions = {},
+): ProxylineNodeProxyAgent | undefined {
+  const env = options.env ?? readProxyEnv();
+  const protocol = options.protocol ?? "https";
+  if (resolveAmbientProxyForUrl(ambientProbeUrl(protocol), env) === undefined) {
+    return undefined;
+  }
+  return new ProxylineNodeProxyAgent({
+    getProxyForUrl: (url) => resolveAmbientProxyForUrl(url, env) ?? "",
   });
 }

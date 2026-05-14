@@ -83,6 +83,17 @@ const socket = await openProxyConnectTunnel({
 });
 ```
 
+### Conditional Node agent
+
+```ts
+import { createAmbientNodeProxyAgent } from "@openclaw/proxyline";
+
+const agent = createAmbientNodeProxyAgent({ protocol: "https" });
+```
+
+The helper returns `undefined` when ambient proxy env is not configured, so callers can pass an agent only when needed.
+It uses Proxyline's built-in HTTP/HTTPS Node agent; SOCKS and PAC proxy schemes remain unsupported.
+
 ## Feature matrix
 
 | Surface | Covered | Notes |

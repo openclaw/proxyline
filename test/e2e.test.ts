@@ -101,6 +101,27 @@ async function readHttps(
   });
 }
 
+async function readHttpsOptions(
+  options: https.RequestOptions,
+): Promise<{ status: number; body: string }> {
+  return await new Promise((resolve, reject) => {
+    const req = https.get({ ...options, timeout: options.timeout ?? 2_000 }, (res) => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => {
+        body += chunk;
+      });
+      res.on("end", () => {
+        resolve({ status: res.statusCode ?? 0, body });
+      });
+    });
+    req.on("timeout", () => {
+      req.destroy(new Error(`HTTPS request timed out for ${String(options.host ?? options.hostname)}`));
+    });
+    req.on("error", reject);
+  });
+}
+
 test("ambient mode routes node:http through HTTP_PROXY", async () => {
   const lab = await startProxyLab();
   const proxy = withProxyEnv({ HTTP_PROXY: lab.proxyUrl }, () =>
@@ -192,6 +213,30 @@ test("ambient mode defaults bare HTTPS_PROXY endpoints to HTTP proxy URLs", asyn
     assert.equal(decision.kind, "proxied");
     assert.equal(decision.proxyUrl, lab.proxyUrl + "/");
     assert.ok(lab.events.some((event) => event.type === "connect"));
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
+test("ambient mode parses host-header ports for node:https CONNECT targets", async () => {
+  const lab = await startProxyLab({ secureTarget: true });
+  assert.ok(lab.targetCa);
+  const target = new URL(lab.targetUrl);
+  const proxy = withProxyEnv({ HTTPS_PROXY: lab.proxyUrl }, () =>
+    installGlobalProxy({ mode: "ambient" }),
+  );
+  try {
+    const allowed = await readHttpsOptions({
+      protocol: "https:",
+      host: target.host,
+      path: "/allowed",
+      ca: lab.targetCa,
+    });
+
+    assert.equal(allowed.status, 200);
+    assert.equal(allowed.body, "allowed via target\n");
+    assert.ok(lab.events.some((event) => event.type === "connect" && event.authority === target.host));
   } finally {
     proxy.stop();
     await lab.close();

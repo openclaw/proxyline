@@ -1,6 +1,5 @@
 import http from "node:http";
 import https from "node:https";
-import { ProxyAgent as NodeProxyAgent } from "proxy-agent";
 import {
   Agent as UndiciAgent,
   Dispatcher,
@@ -26,6 +25,7 @@ import {
   createDirectNodeAgent,
   createNodeProxyAgent,
   type NodeHttpStackSnapshot,
+  type ProxylineNodeProxyAgent,
 } from "./node-http.js";
 import {
   formatUrl,
@@ -45,7 +45,7 @@ import type {
 type RuntimeInstall = {
   installedDispatcher: Dispatcher;
   mode: ProxylineOptions["mode"];
-  nodeAgent: NodeProxyAgent;
+  nodeAgent: ProxylineNodeProxyAgent;
   originalDispatcher: Dispatcher;
   originalFetch: typeof globalThis.fetch;
   originalFormData: typeof globalThis.FormData;
@@ -573,7 +573,7 @@ function installRuntime(
   activeRuntime = runtime;
   try {
     http.globalAgent = nodeAgent;
-    https.globalAgent = nodeAgent;
+    https.globalAgent = nodeAgent as unknown as typeof https.globalAgent;
     http.request = bindNodeHttpMethod(snapshot.httpRequest, () =>
       createNodeProxyAgent(resolver, proxyCa),
     );
