@@ -109,6 +109,7 @@ type ProxylineOptions = Readonly<{
   mode: ProxylineMode;
   proxyUrl?: string | URL;
   proxyTls?: ProxylineTlsOptions;
+  bypassPolicy?: ProxylineBypassPolicy;
   onEvent?: (event: ProxylineEvent) => void;
 }>;
 ```
@@ -116,6 +117,7 @@ type ProxylineOptions = Readonly<{
 - `mode` — required. `"managed"` or `"ambient"`.
 - `proxyUrl` — required in managed mode, ignored in ambient mode. Managed-mode URLs must be `http://` or `https://`.
 - `proxyTls` — CA trust scoped to the proxy endpoint. See [Proxy TLS](./proxy-tls.md).
+- `bypassPolicy` — managed-mode escape hatch for trusted traffic that should go direct. Ignored in ambient mode.
 - `onEvent` — callback fired with every `ProxylineEvent`.
 
 ### `ProxylineTlsOptions`
@@ -144,6 +146,7 @@ type ProxylineDecision = Readonly<{
 Known `reason` values:
 
 - `"managed-proxy-active"` — managed mode applied.
+- `"managed-proxy-bypass-policy"` — managed mode was active, but `bypassPolicy` intentionally sent the URL direct.
 - `"managed-proxy-unsupported-url-scheme"` — managed mode is active, but the URL scheme is not one Proxyline can proxy.
 - `"ambient-proxy-active"` — ambient mode resolved a proxy from env.
 - `"ambient-proxy-not-configured"` — ambient mode has no proxy env set, or the URL scheme is unsupported.
@@ -151,6 +154,23 @@ Known `reason` values:
 - `"runtime-stopped"` — `explain()` was called after `stop()`.
 
 `kind: "blocked"` is reserved for future explicit deny rules; the current implementation does not produce blocked decisions.
+
+### `ProxylineBypassRequest`
+
+```ts
+type ProxylineBypassRequest = Readonly<{
+  surface: ProxylineSurface;
+  url: string;
+}>;
+```
+
+### `ProxylineBypassPolicy`
+
+```ts
+type ProxylineBypassPolicy = (request: ProxylineBypassRequest) => boolean;
+```
+
+Return `true` to send that managed-mode request direct. Use this only for explicitly trusted destinations such as loopback control-plane endpoints.
 
 ### `ProxylineEvent`
 

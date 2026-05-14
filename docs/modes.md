@@ -9,10 +9,11 @@ Managed mode treats proxy routing as a security policy.
 - `proxyUrl` is **required**. Omitting it throws `ProxylineError` with code `MANAGED_PROXY_URL_REQUIRED`.
 - Only `http://` and `https://` proxy endpoints are accepted. Other schemes throw `UNSUPPORTED_PROXY_PROTOCOL`.
 - The managed proxy is forced for HTTP(S) and WS(S) requests on the patched surfaces.
+- `bypassPolicy`, when supplied, is the only managed-mode direct-routing escape hatch. It receives `{ surface, url }` and returns `true` to intentionally send that request direct.
 - Caller-supplied `http.Agent` or `https.Agent` values are replaced per request. TLS-relevant agent options (`ca`, `cert`, `key`, `ciphers`, `minVersion`, `maxVersion`, `rejectUnauthorized`, etc.) are copied onto the proxy request so destination TLS identity is preserved. See [Surfaces — TLS identity preservation](./surfaces.md#tls-identity-preservation) for the full list.
 - The undici global dispatcher is replaced with an `undici.ProxyAgent` pointed at `proxyUrl`.
 - Environment variables (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, ...) are **ignored**.
-- `explain()` returns `kind: "proxied"` with `reason: "managed-proxy-active"` for supported URL schemes. Unsupported schemes return `kind: "direct"` with `reason: "managed-proxy-unsupported-url-scheme"` because Proxyline has no safe proxy mapping for them.
+- `explain()` returns `kind: "proxied"` with `reason: "managed-proxy-active"` for supported URL schemes. Bypassed URLs return `kind: "direct"` with `reason: "managed-proxy-bypass-policy"`. Unsupported schemes return `kind: "direct"` with `reason: "managed-proxy-unsupported-url-scheme"` because Proxyline has no safe proxy mapping for them.
 
 Use managed mode when "go direct" must never be silent. If your network policy demands traffic egress through a specific gateway, this is the posture you want.
 
@@ -21,6 +22,7 @@ const proxy = installGlobalProxy({
   mode: "managed",
   proxyUrl: "https://proxy.corp.example:8443",
   proxyTls: { caFile: "/etc/proxy-ca.pem" },
+  bypassPolicy: ({ url }) => new URL(url).hostname === "127.0.0.1",
 });
 ```
 
@@ -54,10 +56,11 @@ if (!proxy.active) {
 | Requires `proxyUrl` | yes | no (ignored if passed) |
 | Reads env variables | no | yes |
 | Honors `NO_PROXY` | no | yes |
+| Supports `bypassPolicy` | yes | no |
 | Forces traffic through proxy | yes | only when env says so |
 | Replaces caller-supplied agents | yes | yes (when active) |
 | Installs undici dispatcher | `ProxyAgent` | Proxyline ambient dispatcher |
-| `explain()` direct reason | `managed-proxy-unsupported-url-scheme` for unsupported schemes | `no-proxy-match` or `ambient-proxy-not-configured` |
+| `explain()` direct reason | `managed-proxy-bypass-policy` or `managed-proxy-unsupported-url-scheme` | `no-proxy-match` or `ambient-proxy-not-configured` |
 | Setup failure mode | throws | inactive but installed |
 
 ## Why a strict managed mode

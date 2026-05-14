@@ -39,7 +39,7 @@ const decision = proxy.explain("https://api.example.com/v1/users", {
 // decision.proxyUrl: "https://proxy.corp.example:8443/"   (redacted)
 ```
 
-`explain()` does not perform a request; it inspects the resolver and returns its verdict. It also emits a `decision` event, so a single callback can capture both implicit (real requests) and explicit (probe) routing decisions in your logs.
+`explain()` does not perform a request; it inspects the resolver and returns its verdict. It also emits a `decision` event, so a single callback can capture every explicit routing probe in your logs.
 
 After `stop()`, `explain()` returns `kind: "direct"`, `reason: "runtime-stopped"`.
 
@@ -76,7 +76,7 @@ const proxy = installGlobalProxy({
 });
 ```
 
-`explain()` is decoupled from real requests, so wire it into the codepaths you actually care about — e.g. inside a fetch wrapper:
+`explain()` is decoupled from real requests, so wire it into the codepaths you actually care about, e.g. inside a fetch wrapper:
 
 ```ts
 async function loggedFetch(url: string, init?: RequestInit) {

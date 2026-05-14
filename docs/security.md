@@ -20,6 +20,8 @@ In **managed** mode, Proxyline forces traffic through the configured proxy on th
 
 Caller-supplied `http.Agent` / `https.Agent` instances are replaced per request, and `createConnection` overrides are stripped. TLS-relevant agent options are lifted onto the request so destination TLS still validates correctly.
 
+Managed mode can also accept a `bypassPolicy` callback for explicitly trusted direct-routing exceptions, such as local control-plane endpoints. Treat it as part of your security policy: keep it narrow and log matching URLs with `explain()`.
+
 In **ambient** mode the same surfaces are covered when at least one supported `http://` or `https://` proxy endpoint is set through `HTTP_PROXY`, `HTTPS_PROXY`, or `ALL_PROXY`; unsupported proxy schemes are ignored, and `NO_PROXY` is honored.
 
 ## What Proxyline cannot enforce
@@ -68,6 +70,7 @@ This is deliberate: two competing proxy patches would race on `http.request` and
 | --- | --- | --- |
 | Library passes a direct `http.Agent` per request | yes (managed) | Replaced before the request runs |
 | Library passes a direct `Dispatcher` to managed `globalThis.fetch` | yes | Explicit dispatchers are stripped |
+| Trusted local endpoint needs direct routing | yes, with `bypassPolicy` | Keep the callback narrow and auditable |
 | Library calls imported `undici.fetch` with a direct `Dispatcher` | no | Imported function references are outside the global fetch patch |
 | Library uses `net.connect` directly | no | Out of scope |
 | Library captured `http.request` at import time | no (if before install) | Install Proxyline first |

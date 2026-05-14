@@ -7,7 +7,7 @@ The lab lives in `test/support/proxy-lab.ts`. It is not exported from the packag
 ## Run the suite
 
 ```bash
-pnpm check       # typecheck + test
+pnpm check       # build + typecheck + coverage-gated tests
 pnpm test        # build + unit, integration, and package-entrypoint tests
 pnpm coverage    # build + tests with native Node source coverage
 pnpm typecheck   # type-only
@@ -41,6 +41,7 @@ Test coverage exercises:
 - HTTPS proxy endpoints with scoped CA trust
 - node:http global routing
 - Caller-supplied agent override (managed mode)
+- Managed-mode `bypassPolicy`
 - HTTPS caller agent TLS option preservation
 - undici/fetch routing
 - WebSocket agent routing

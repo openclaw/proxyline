@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Documented managed-mode `bypassPolicy` and clarified coverage-gated CI behavior.
+
 ## 0.2.0 - 2026-05-14
 
 - Added ambient Node proxy helper exports and replaced the `proxy-agent` dependency with Proxyline's scoped HTTP/HTTPS Node agent.
