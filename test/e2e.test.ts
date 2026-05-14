@@ -14,6 +14,8 @@ import {
   installGlobalProxy,
   openProxyConnectTunnel,
 } from "../src/index.js";
+import { createNodeProxyAgent } from "../src/node-http.js";
+import type { ProxyResolver } from "../src/types.js";
 import { startProxyLab } from "./support/proxy-lab.js";
 
 function withProxyEnv<T>(env: Record<string, string | undefined>, run: () => T): T {
@@ -285,6 +287,29 @@ test("managed mode uses port 443 for default-port node:https CONNECT targets", a
       assert.deepEqual(authorities, ["example.test:443"]);
     } finally {
       proxy.stop();
+    }
+  });
+});
+
+test("node helper agents infer default HTTPS ports with stack traces disabled", async () => {
+  await withConnectRecorder(async (proxyUrl, authorities) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
+    };
+    const agent = createNodeProxyAgent(resolver, undefined);
+    const originalStackTraceLimit = Error.stackTraceLimit;
+    Error.stackTraceLimit = 0;
+    try {
+      await assert.rejects(readHttps("https://example.test/allowed", { agent, timeout: 1_000 }));
+      assert.deepEqual(authorities, ["example.test:443"]);
+    } finally {
+      Error.stackTraceLimit = originalStackTraceLimit;
+      agent.destroy();
     }
   });
 });

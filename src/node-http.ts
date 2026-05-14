@@ -632,7 +632,17 @@ export class ProxylineNodeProxyAgent extends http.Agent {
   }
 
   #callStackProtocol(): "http" | "https" | undefined {
-    const stack = new Error().stack;
+    const originalStackTraceLimit = Error.stackTraceLimit;
+    if (typeof originalStackTraceLimit === "number" && originalStackTraceLimit < 20) {
+      // Node reads agent.protocol/defaultPort before addRequest, so this is the only caller signal.
+      Error.stackTraceLimit = 20;
+    }
+    let stack: string | undefined;
+    try {
+      stack = new Error().stack;
+    } finally {
+      Error.stackTraceLimit = originalStackTraceLimit;
+    }
     if (typeof stack !== "string") {
       return undefined;
     }
