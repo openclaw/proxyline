@@ -266,6 +266,28 @@ test("ambient Node proxy helper trusts HTTPS proxy endpoints with scoped proxy T
   }
 });
 
+test("ambient Node proxy helper routes HTTP callers even when probing HTTPS by default", async () => {
+  const lab = await startProxyLab();
+  const agent = withProxyEnv(
+    {
+      HTTP_PROXY: lab.proxyUrl,
+      HTTPS_PROXY: "http://127.0.0.1:9",
+    },
+    () => createAmbientNodeProxyAgent(),
+  );
+  try {
+    assert.ok(agent);
+    const denied = await readHttp(`${lab.targetUrl}/denied`, agent);
+
+    assert.equal(denied.status, 403);
+    assert.match(denied.body, /blocked by proxy lab/);
+    assert.ok(lab.events.some((event) => event.type === "deny"));
+  } finally {
+    agent?.destroy();
+    await lab.close();
+  }
+});
+
 test("ambient mode defaults bare HTTPS_PROXY endpoints to HTTP proxy URLs", async () => {
   const lab = await startProxyLab({ secureTarget: true });
   assert.ok(lab.targetCa);

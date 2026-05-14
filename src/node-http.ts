@@ -520,8 +520,9 @@ export class ProxylineNodeProxyAgent extends http.Agent {
   }
 
   public get defaultPort(): number {
+    const stackProtocol = this.#callStackProtocol();
     return nodeAgentDefaultPorts.get(this) ??
-      (this.#isHttpsCallStack() || this.#defaultProtocol === "https" ? 443 : 80);
+      ((stackProtocol ?? this.#defaultProtocol) === "https" ? 443 : 80);
   }
 
   public set defaultPort(value: number) {
@@ -529,7 +530,7 @@ export class ProxylineNodeProxyAgent extends http.Agent {
   }
 
   public get protocol(): string {
-    return this.#isHttpsCallStack() ? "https:" : `${this.#defaultProtocol}:`;
+    return `${this.#callStackProtocol() ?? this.#defaultProtocol}:`;
   }
 
   public set protocol(_value: string) {
@@ -540,12 +541,20 @@ export class ProxylineNodeProxyAgent extends http.Agent {
     return this.#getProxyForUrl(url, request);
   }
 
-  #isHttpsCallStack(): boolean {
+  #callStackProtocol(): "http" | "https" | undefined {
     const stack = new Error().stack;
     if (typeof stack !== "string") {
-      return false;
+      return undefined;
     }
-    return stack.split("\n").some((line) => line.includes("node:https:"));
+    for (const line of stack.split("\n")) {
+      if (line.includes("node:https:")) {
+        return "https";
+      }
+      if (line.includes("node:http:")) {
+        return "http";
+      }
+    }
+    return undefined;
   }
 
   public addRequest(req: http.ClientRequest, options: NodeAgentRequestOptions): void {
