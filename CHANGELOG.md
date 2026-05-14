@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Added ambient Node proxy helper exports and replaced the `proxy-agent` dependency with Proxyline's scoped HTTP/HTTPS Node agent.
+
 ## 0.1.1 - 2026-05-12
 
 - Hardened ambient proxy routing, CONNECT target validation, undici dispatcher cleanup, and generated package output after the runtime module split.

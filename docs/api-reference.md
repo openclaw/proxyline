@@ -1,6 +1,6 @@
 # API Reference
 
-Every public export, with the exact shape from `src/index.ts` and `src/connect.ts`.
+Every public export, with the exact shape from `src/index.ts`, `src/connect.ts`, and `src/node-http.ts`.
 
 ## Functions
 
@@ -17,7 +17,7 @@ In managed mode (and active ambient mode), `installProxyline`:
 - Captures originals for `http.request`, `http.get`, `http.globalAgent`, `https.request`, `https.get`, `https.globalAgent`.
 - Captures the current undici global dispatcher and fetch globals.
 - Installs patched `http.request`/`get`, `https.request`/`get`.
-- Replaces `http.globalAgent` and `https.globalAgent` with a `proxy-agent` `ProxyAgent`.
+- Replaces `http.globalAgent` and `https.globalAgent` with Proxyline's HTTP/HTTPS Node agent.
 - Calls `undici.setGlobalDispatcher` with a `ProxyAgent` (managed) or Proxyline's ambient dispatcher (ambient), and patches `globalThis.fetch` plus `Request`, `Response`, `Headers`, and `FormData` to use that dispatcher-compatible fetch stack.
 - Emits `runtime.installed`.
 
@@ -26,6 +26,25 @@ In inactive ambient mode (no supported proxy env variables), no patches are inst
 ### `openProxyConnectTunnel(options): Promise<net.Socket | tls.TLSSocket>`
 
 Opens a one-shot HTTP CONNECT tunnel through a proxy. See [Surfaces — HTTP CONNECT tunnel](./surfaces.md#http-connect-tunnel).
+
+### `hasAmbientNodeProxyConfigured(options?): boolean`
+
+Returns `true` when the ambient proxy environment would proxy a probe URL for the requested protocol. Defaults to `protocol: "https"`.
+
+```ts
+hasAmbientNodeProxyConfigured({ protocol: "https" });
+```
+
+### `createAmbientNodeProxyAgent(options?): http.Agent | undefined`
+
+Returns a Proxyline-backed Node agent when ambient env proxy settings apply, or `undefined` when no proxy is configured for the requested protocol. This is for libraries that accept a Node `agent` option but should stay direct when the operator has no proxy env configured.
+
+```ts
+const agent = createAmbientNodeProxyAgent({
+  protocol: "https",
+  proxyTls: { caFile: "/etc/proxy-ca.pem" },
+});
+```
 
 ### `redactProxyUrl(value: string | URL): string`
 
@@ -193,3 +212,17 @@ type OpenProxyConnectTunnelOptions = Readonly<{
 - `proxyTls` — CA trust for HTTPS proxies. See [Proxy TLS](./proxy-tls.md).
 - `targetHost` / `targetPort` — what to ask the proxy to connect to.
 - `timeoutMs` — overall budget for the CONNECT handshake.
+
+### `AmbientNodeProxyAgentOptions`
+
+```ts
+type AmbientNodeProxyAgentOptions = {
+  env?: ProxyEnvSnapshot;
+  protocol?: "http" | "https";
+  proxyTls?: ProxylineTlsOptions;
+};
+```
+
+- `env` — optional env snapshot. Defaults to reading process env.
+- `protocol` — probe protocol, defaulting to `"https"`.
+- `proxyTls` — CA trust for HTTPS proxy endpoints. See [Proxy TLS](./proxy-tls.md).

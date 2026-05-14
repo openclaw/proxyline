@@ -2,13 +2,22 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import http from "node:http";
 import https from "node:https";
-import { type AddressInfo } from "node:net";
+import net, { type AddressInfo } from "node:net";
+import { Duplex } from "node:stream";
+import tls from "node:tls";
 import { URL } from "node:url";
 import test from "node:test";
 import { Dispatcher, fetch } from "undici";
 import WebSocket from "ws";
 import { createWebSocketServer } from "./support/ws-server.js";
-import { installGlobalProxy, openProxyConnectTunnel } from "../src/index.js";
+import {
+  createAmbientNodeProxyAgent,
+  installGlobalProxy,
+  openProxyConnectTunnel,
+  ProxylineError,
+} from "../src/index.js";
+import { createNodeProxyAgent } from "../src/node-http.js";
+import type { ProxyResolver } from "../src/types.js";
 import { startProxyLab } from "./support/proxy-lab.js";
 
 function withProxyEnv<T>(env: Record<string, string | undefined>, run: () => T): T {
@@ -101,6 +110,117 @@ async function readHttps(
   });
 }
 
+async function readHttpsOptions(
+  options: https.RequestOptions,
+): Promise<{ status: number; body: string }> {
+  return await new Promise((resolve, reject) => {
+    const req = https.get({ ...options, timeout: options.timeout ?? 2_000 }, (res) => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => {
+        body += chunk;
+      });
+      res.on("end", () => {
+        resolve({ status: res.statusCode ?? 0, body });
+      });
+    });
+    req.on("timeout", () => {
+      req.destroy(new Error(`HTTPS request timed out for ${String(options.host ?? options.hostname)}`));
+    });
+    req.on("error", reject);
+  });
+}
+
+async function withConnectRecorder<T>(
+  run: (proxyUrl: string, authorities: string[]) => Promise<T>,
+): Promise<T> {
+  const authorities: string[] = [];
+  const proxy = http.createServer();
+  proxy.on("connect", (req, socket) => {
+    authorities.push(req.url ?? "");
+    socket.end("HTTP/1.1 403 Forbidden\r\n\r\n");
+  });
+  proxy.listen(0, "127.0.0.1");
+  await once(proxy, "listening");
+  const address = proxy.address() as AddressInfo;
+  try {
+    return await run(`http://127.0.0.1:${address.port}`, authorities);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      proxy.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+  }
+}
+
+async function withStalledConnectProxy<T>(
+  run: (proxyUrl: string, activeSockets: Set<Duplex>) => Promise<T>,
+): Promise<T> {
+  const proxyServer = http.createServer();
+  const activeSockets = new Set<Duplex>();
+  const allSockets = new Set<Duplex>();
+  proxyServer.on("connect", (_req, socket) => {
+    activeSockets.add(socket);
+    allSockets.add(socket);
+    socket.once("end", () => {
+      activeSockets.delete(socket);
+    });
+    socket.once("close", () => {
+      activeSockets.delete(socket);
+      allSockets.delete(socket);
+    });
+  });
+  proxyServer.listen(0, "127.0.0.1");
+  await once(proxyServer, "listening");
+  const address = proxyServer.address() as AddressInfo;
+  try {
+    return await run(`http://127.0.0.1:${address.port}`, activeSockets);
+  } finally {
+    for (const socket of allSockets) {
+      socket.destroy();
+    }
+    await new Promise<void>((resolve, reject) => {
+      proxyServer.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+  }
+}
+
+class FakeProxySocket extends Duplex {
+  public override _read(): void {}
+
+  public override _write(chunk: Buffer, _encoding: BufferEncoding, callback: (error?: Error | null) => void): void {
+    if (chunk.toString("latin1").startsWith("CONNECT ")) {
+      queueMicrotask(() => {
+        this.emit("data", Buffer.from("HTTP/1.1 200 Connection Established\r\n\r\n"));
+      });
+    }
+    callback();
+  }
+
+  public setNoDelay(): this {
+    return this;
+  }
+
+  public setKeepAlive(): this {
+    return this;
+  }
+
+  public setTimeout(): this {
+    return this;
+  }
+}
+
 test("ambient mode routes node:http through HTTP_PROXY", async () => {
   const lab = await startProxyLab();
   const proxy = withProxyEnv({ HTTP_PROXY: lab.proxyUrl }, () =>
@@ -124,9 +244,59 @@ test("ambient mode routes node:http through HTTP_PROXY", async () => {
   }
 });
 
-test("ambient mode preserves absolute-form HTTPS request paths on node:http", async () => {
+test("managed mode evaluates node:http proxy policy against the socket destination", async () => {
   const lab = await startProxyLab();
-  const proxy = withProxyEnv({ HTTPS_PROXY: lab.proxyUrl }, () =>
+  const targetUrl = new URL(lab.targetUrl);
+  const proxy = installGlobalProxy({
+    mode: "managed",
+    proxyUrl: lab.proxyUrl,
+    bypassPolicy: ({ url }) => new URL(url).hostname === "localhost",
+  });
+  try {
+    const denied = await readHttpOptions({
+      headers: { host: "localhost" },
+      hostname: targetUrl.hostname,
+      path: "/denied",
+      port: targetUrl.port,
+      protocol: "http:",
+    });
+
+    assert.equal(denied.status, 403);
+    assert.match(denied.body, /blocked by proxy lab/);
+    assert.ok(lab.events.some((event) => event.type === "deny" && event.url.endsWith("/denied")));
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
+test("managed mode preserves origin-form paths that start with double slash", async () => {
+  const lab = await startProxyLab();
+  const targetUrl = new URL(lab.targetUrl);
+  const proxy = installGlobalProxy({ mode: "managed", proxyUrl: lab.proxyUrl });
+  try {
+    const response = await readHttpOptions({
+      hostname: targetUrl.hostname,
+      path: "//double",
+      port: targetUrl.port,
+      protocol: "http:",
+    });
+
+    assert.equal(response.status, 200);
+    assert.ok(
+      lab.events.some(
+        (event) => event.type === "request" && event.url === `${lab.targetUrl}//double`,
+      ),
+    );
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
+test("ambient mode preserves absolute-form HTTPS request paths on proxied node:http", async () => {
+  const lab = await startProxyLab();
+  const proxy = withProxyEnv({ HTTP_PROXY: lab.proxyUrl }, () =>
     installGlobalProxy({ mode: "ambient" }),
   );
   try {
@@ -154,6 +324,28 @@ test("ambient mode preserves absolute-form HTTPS request paths on node:http", as
   }
 });
 
+test("managed mode evaluates absolute-form node:http proxy policy against the socket destination", async () => {
+  const lab = await startProxyLab();
+  const proxy = installGlobalProxy({
+    mode: "managed",
+    proxyUrl: lab.proxyUrl,
+    bypassPolicy: ({ url }) => new URL(url).hostname === "localhost",
+  });
+  try {
+    const response = await readHttpOptions({
+      hostname: "evil.example",
+      path: "http://localhost/denied",
+      protocol: "http:",
+    });
+
+    assert.equal(response.status, 403);
+    assert.ok(lab.events.some((event) => event.type === "deny" && event.url === "http://localhost/denied"));
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
 test("ambient mode routes node:https through HTTPS_PROXY", async () => {
   const lab = await startProxyLab({ secureTarget: true });
   assert.ok(lab.targetCa);
@@ -170,6 +362,538 @@ test("ambient mode routes node:https through HTTPS_PROXY", async () => {
     assert.ok(lab.events.some((event) => event.type === "connect"));
   } finally {
     proxy.stop();
+    await lab.close();
+  }
+});
+
+test("managed mode uses port 443 for default-port node:https CONNECT targets", async () => {
+  await withConnectRecorder(async (proxyUrl, authorities) => {
+    const proxy = installGlobalProxy({ mode: "managed", proxyUrl });
+    try {
+      await assert.rejects(readHttps("https://example.test/allowed", { timeout: 1_000 }));
+      assert.deepEqual(authorities, ["example.test:443"]);
+    } finally {
+      proxy.stop();
+    }
+  });
+});
+
+test("node helper agents route object-form HTTPS requests as secure endpoints", async () => {
+  await withConnectRecorder(async (proxyUrl, authorities) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
+    };
+    const agent = createNodeProxyAgent(resolver, undefined);
+    try {
+      await assert.rejects(
+        readHttpsOptions({
+          agent,
+          hostname: "example.test",
+          path: "/allowed",
+          timeout: 1_000,
+        }),
+      );
+      assert.deepEqual(authorities, ["example.test:443"]);
+    } finally {
+      agent.destroy();
+    }
+  });
+});
+
+test("node CONNECT agents reject unsafe object-form HTTPS hosts before proxying", async () => {
+  await withConnectRecorder(async (proxyUrl, authorities) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
+    };
+    const agent = createNodeProxyAgent(resolver, undefined);
+    try {
+      await assert.rejects(
+        readHttpsOptions({
+          agent,
+          headers: { host: "safe.example" },
+          hostname: "evil.example\r\nProxy-Authorization: injected",
+          path: "/allowed",
+          timeout: 1_000,
+        }),
+        (error: unknown) =>
+          error instanceof ProxylineError && error.code === "INVALID_CONNECT_TARGET",
+      );
+      assert.deepEqual(authorities, []);
+    } finally {
+      agent.destroy();
+    }
+  });
+});
+
+test("node CONNECT agents reject delimiter-truncated object-form HTTPS hosts", async () => {
+  await withConnectRecorder(async (proxyUrl, authorities) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
+    };
+    const agent = createNodeProxyAgent(resolver, undefined);
+    try {
+      await assert.rejects(
+        readHttpsOptions({
+          agent,
+          hostname: "evil.example/path",
+          path: "/allowed",
+          timeout: 1_000,
+        }),
+        (error: unknown) =>
+          error instanceof ProxylineError && error.code === "INVALID_CONNECT_TARGET",
+      );
+      assert.deepEqual(authorities, []);
+    } finally {
+      agent.destroy();
+    }
+  });
+});
+
+test("node CONNECT agents reject control-truncated object-form HTTPS hosts", async () => {
+  await withConnectRecorder(async (proxyUrl, authorities) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
+    };
+    const agent = createNodeProxyAgent(resolver, undefined);
+    try {
+      await assert.rejects(
+        readHttpsOptions({
+          agent,
+          hostname: "evil\thost.example",
+          path: "/allowed",
+          timeout: 1_000,
+        }),
+        (error: unknown) =>
+          error instanceof ProxylineError && error.code === "INVALID_CONNECT_TARGET",
+      );
+      assert.deepEqual(authorities, []);
+    } finally {
+      agent.destroy();
+    }
+  });
+});
+
+test("node CONNECT agents encode object-form HTTPS Unicode hosts", async () => {
+  await withConnectRecorder(async (proxyUrl, authorities) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
+    };
+    const agent = createNodeProxyAgent(resolver, undefined);
+    try {
+      await assert.rejects(
+        readHttpsOptions({
+          agent,
+          hostname: "bücher.example",
+          path: "/allowed",
+          timeout: 1_000,
+        }),
+      );
+      assert.deepEqual(authorities, ["xn--bcher-kva.example:443"]);
+    } finally {
+      agent.destroy();
+    }
+  });
+});
+
+test("node CONNECT agents ignore absolute-form paths for secure proxy decisions", async () => {
+  await withConnectRecorder(async (proxyUrl, authorities) => {
+    const seenUrls: string[] = [];
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: (url) => {
+        seenUrls.push(url);
+        return new URL(url).hostname === "bypass.example" ? "" : proxyUrl;
+      },
+    };
+    const agent = createNodeProxyAgent(resolver, undefined, "https");
+    try {
+      await assert.rejects(
+        readHttpsOptions({
+          agent,
+          hostname: "real.example",
+          path: "https://bypass.example/secret",
+          timeout: 1_000,
+        }),
+      );
+      assert.equal(new URL(seenUrls[0] ?? "").hostname, "real.example");
+      assert.deepEqual(authorities, ["real.example:443"]);
+    } finally {
+      agent.destroy();
+    }
+  });
+});
+
+test("node helper agents infer default HTTPS ports with stack traces disabled", async () => {
+  await withConnectRecorder(async (proxyUrl, authorities) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
+    };
+    const agent = createNodeProxyAgent(resolver, undefined);
+    const originalStackTraceLimit = Error.stackTraceLimit;
+    Error.stackTraceLimit = 0;
+    try {
+      await assert.rejects(readHttps("https://example.test/allowed", { agent, timeout: 1_000 }));
+      assert.deepEqual(authorities, ["example.test:443"]);
+    } finally {
+      Error.stackTraceLimit = originalStackTraceLimit;
+      agent.destroy();
+    }
+  });
+});
+
+test("node helper agents infer default HTTPS ports with non-number stack trace limits", async () => {
+  await withConnectRecorder(async (proxyUrl, authorities) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
+    };
+    const agent = createNodeProxyAgent(resolver, undefined);
+    const errorConstructor = Error as unknown as { stackTraceLimit: unknown };
+    const originalStackTraceLimit = errorConstructor.stackTraceLimit;
+    errorConstructor.stackTraceLimit = undefined;
+    try {
+      await assert.rejects(readHttps("https://example.test/allowed", { agent, timeout: 1_000 }));
+      assert.deepEqual(authorities, ["example.test:443"]);
+    } finally {
+      errorConstructor.stackTraceLimit = originalStackTraceLimit;
+      agent.destroy();
+    }
+  });
+});
+
+test("node helper agents infer default HTTPS ports with custom stack formatters", async () => {
+  await withConnectRecorder(async (proxyUrl, authorities) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
+    };
+    const agent = createNodeProxyAgent(resolver, undefined);
+    const originalPrepareStackTrace = Error.prepareStackTrace;
+    Error.prepareStackTrace = () => [];
+    try {
+      await assert.rejects(readHttps("https://example.test/allowed", { agent, timeout: 1_000 }));
+      assert.deepEqual(authorities, ["example.test:443"]);
+    } finally {
+      Error.prepareStackTrace = originalPrepareStackTrace;
+      agent.destroy();
+    }
+  });
+});
+
+test("managed mode times out stalled node:https CONNECT handshakes", async () => {
+  await withStalledConnectProxy(async (proxyUrl, activeSockets) => {
+    const proxy = installGlobalProxy({
+      mode: "managed",
+      proxyUrl,
+    });
+    try {
+      await assert.rejects(readHttps("https://example.test/allowed", { timeout: 50 }), /timed out/);
+      for (let attempt = 0; attempt < 20 && activeSockets.size > 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.equal(activeSockets.size, 0);
+    } finally {
+      proxy.stop();
+    }
+  });
+});
+
+test("managed mode honors req.setTimeout during stalled node:https CONNECT handshakes", async () => {
+  await withStalledConnectProxy(async (proxyUrl, activeSockets) => {
+    const proxy = installGlobalProxy({
+      mode: "managed",
+      proxyUrl,
+    });
+    try {
+      await assert.rejects(
+        new Promise<void>((resolve, reject) => {
+          const req = https.get("https://example.test/allowed", () => {
+            resolve();
+          });
+          req.setTimeout(50, () => {
+            req.destroy(new Error("late request timeout"));
+          });
+          req.on("error", reject);
+        }),
+        /timeout|timed out/,
+      );
+      for (let attempt = 0; attempt < 20 && activeSockets.size > 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.equal(activeSockets.size, 0);
+    } finally {
+      proxy.stop();
+    }
+  });
+});
+
+test("node CONNECT agent clears pending timeouts when req.setTimeout disables them", async () => {
+  await withStalledConnectProxy(async (proxyUrl, activeSockets) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
+    };
+    const agent = createNodeProxyAgent(resolver, undefined, "https");
+    const req = https.get("https://example.test/allowed", { agent, timeout: 50 }, () => {});
+    let requestError: Error | undefined;
+    req.on("error", (error) => {
+      requestError = error;
+    });
+    try {
+      req.setTimeout(0);
+      for (let attempt = 0; attempt < 20 && activeSockets.size === 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.equal(activeSockets.size, 1);
+
+      await new Promise((resolve) => setTimeout(resolve, 120));
+
+      assert.equal(requestError, undefined);
+      assert.equal(activeSockets.size, 1);
+    } finally {
+      req.destroy();
+      agent.destroy();
+    }
+  });
+});
+
+test("node CONNECT agent destroys pending proxy sockets when the agent is destroyed", async () => {
+  await withStalledConnectProxy(async (proxyUrl, activeSockets) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
+    };
+    const agent = createNodeProxyAgent(resolver, undefined, "https");
+    const req = https.get("https://example.test/allowed", { agent }, () => {});
+    const requestClosed = new Promise<void>((resolve) => {
+      req.once("error", () => resolve());
+      req.once("close", () => resolve());
+    });
+    try {
+      for (let attempt = 0; attempt < 20 && activeSockets.size === 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.equal(activeSockets.size, 1);
+
+      agent.destroy();
+
+      for (let attempt = 0; attempt < 20 && activeSockets.size > 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.equal(activeSockets.size, 0);
+      await requestClosed;
+    } finally {
+      req.destroy();
+      agent.destroy();
+    }
+  });
+});
+
+test("node CONNECT agent fails requests when destination TLS closes during handshake", async () => {
+  const netMutable = net as unknown as { connect: (...args: unknown[]) => net.Socket };
+  const tlsMutable = tls as unknown as { connect: (...args: unknown[]) => tls.TLSSocket };
+  const originalNetConnect = netMutable.connect;
+  const originalTlsConnect = tlsMutable.connect;
+  let tlsSocket: FakeProxySocket | undefined;
+  const resolver: ProxyResolver = {
+    active: true,
+    describeProxy: () => "http://proxy.example:8080/",
+    explain: () => {
+      throw new Error("not used");
+    },
+    getProxyForUrl: () => "http://proxy.example:8080/",
+  };
+  const agent = createNodeProxyAgent(resolver, undefined, "https");
+  try {
+    netMutable.connect = () => {
+      const proxySocket = new FakeProxySocket();
+      queueMicrotask(() => proxySocket.emit("connect"));
+      return proxySocket as unknown as net.Socket;
+    };
+    tlsMutable.connect = () => {
+      tlsSocket = new FakeProxySocket();
+      return tlsSocket as unknown as tls.TLSSocket;
+    };
+
+    const requestError = new Promise<Error>((resolve) => {
+      const req = https.get("https://example.test/", { agent }, () => {});
+      req.once("error", resolve);
+    });
+    for (let attempt = 0; attempt < 20 && tlsSocket === undefined; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.ok(tlsSocket);
+
+    agent.destroy();
+
+    await assert.rejects(
+      Promise.race([
+        requestError.then((error) => {
+          throw error;
+        }),
+        new Promise<void>((resolve) => setTimeout(resolve, 500)),
+      ]),
+      /destination TLS socket closed/,
+    );
+  } finally {
+    netMutable.connect = originalNetConnect;
+    tlsMutable.connect = originalTlsConnect;
+    agent.destroy();
+  }
+});
+
+test("node CONNECT agent detaches its parser before destination TLS", async () => {
+  const netMutable = net as unknown as { connect: (...args: unknown[]) => net.Socket };
+  const tlsMutable = tls as unknown as { connect: (...args: unknown[]) => tls.TLSSocket };
+  const originalNetConnect = netMutable.connect;
+  const originalTlsConnect = tlsMutable.connect;
+  let proxySocket: FakeProxySocket | undefined;
+  let tlsConnects = 0;
+  const resolver: ProxyResolver = {
+    active: true,
+    describeProxy: () => "http://proxy.example:8080/",
+    explain: () => {
+      throw new Error("not used");
+    },
+    getProxyForUrl: () => "http://proxy.example:8080/",
+  };
+  const agent = createNodeProxyAgent(resolver, undefined, "https");
+  try {
+    netMutable.connect = () => {
+      proxySocket = new FakeProxySocket();
+      queueMicrotask(() => proxySocket?.emit("connect"));
+      return proxySocket as unknown as net.Socket;
+    };
+    tlsMutable.connect = (...args: unknown[]) => {
+      tlsConnects += 1;
+      const callback = args.find((arg): arg is () => void => typeof arg === "function");
+      const socket = new FakeProxySocket() as unknown as tls.TLSSocket;
+      queueMicrotask(() => {
+        socket.emit("secureConnect");
+        callback?.();
+      });
+      return socket;
+    };
+
+    await new Promise<void>((resolve, reject) => {
+      const req = https.get("https://example.test/", { agent, timeout: 1_000 }, () => {});
+      req.on("error", reject);
+      req.on("socket", () => {
+        proxySocket?.emit("data", Buffer.from("encrypted target bytes"));
+        setImmediate(() => {
+          try {
+            assert.equal(tlsConnects, 1);
+            req.destroy();
+            resolve();
+          } catch (error) {
+            reject(error);
+          }
+        });
+      });
+    });
+  } finally {
+    netMutable.connect = originalNetConnect;
+    tlsMutable.connect = originalTlsConnect;
+    agent.destroy();
+  }
+});
+
+test("ambient Node proxy helper trusts HTTPS proxy endpoints with scoped proxy TLS", async () => {
+  const lab = await startProxyLab({ secureProxy: true, secureTarget: true });
+  const proxyCa = lab.proxyCa;
+  const targetCa = lab.targetCa;
+  assert.ok(proxyCa);
+  assert.ok(targetCa);
+  const agent = withProxyEnv({ HTTPS_PROXY: lab.proxyUrl }, () =>
+    createAmbientNodeProxyAgent({
+      protocol: "https",
+      proxyTls: { ca: proxyCa },
+    }),
+  );
+  try {
+    assert.ok(agent);
+    const allowed = await readHttps(`${lab.targetUrl}/allowed`, {
+      agent,
+      ca: targetCa,
+    });
+
+    assert.equal(allowed.status, 200);
+    assert.equal(allowed.body, "allowed via target\n");
+    assert.ok(lab.events.some((event) => event.type === "connect"));
+  } finally {
+    agent?.destroy();
+    await lab.close();
+  }
+});
+
+test("ambient Node proxy helper routes HTTP callers even when probing HTTPS by default", async () => {
+  const lab = await startProxyLab();
+  const agent = withProxyEnv(
+    {
+      HTTP_PROXY: lab.proxyUrl,
+      HTTPS_PROXY: "http://127.0.0.1:9",
+    },
+    () => createAmbientNodeProxyAgent(),
+  );
+  try {
+    assert.ok(agent);
+    const denied = await readHttp(`${lab.targetUrl}/denied`, agent);
+
+    assert.equal(denied.status, 403);
+    assert.match(denied.body, /blocked by proxy lab/);
+    assert.ok(lab.events.some((event) => event.type === "deny"));
+  } finally {
+    agent?.destroy();
     await lab.close();
   }
 });
@@ -192,6 +916,30 @@ test("ambient mode defaults bare HTTPS_PROXY endpoints to HTTP proxy URLs", asyn
     assert.equal(decision.kind, "proxied");
     assert.equal(decision.proxyUrl, lab.proxyUrl + "/");
     assert.ok(lab.events.some((event) => event.type === "connect"));
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
+test("ambient mode parses host-header ports for node:https CONNECT targets", async () => {
+  const lab = await startProxyLab({ secureTarget: true });
+  assert.ok(lab.targetCa);
+  const target = new URL(lab.targetUrl);
+  const proxy = withProxyEnv({ HTTPS_PROXY: lab.proxyUrl }, () =>
+    installGlobalProxy({ mode: "ambient" }),
+  );
+  try {
+    const allowed = await readHttpsOptions({
+      protocol: "https:",
+      host: target.host,
+      path: "/allowed",
+      ca: lab.targetCa,
+    });
+
+    assert.equal(allowed.status, 200);
+    assert.equal(allowed.body, "allowed via target\n");
+    assert.ok(lab.events.some((event) => event.type === "connect" && event.authority === target.host));
   } finally {
     proxy.stop();
     await lab.close();

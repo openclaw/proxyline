@@ -22,7 +22,7 @@ type ProxylineTlsOptions = Readonly<{
 
 Pass exactly one. `ca` wins when both are provided. The resolved PEM is forwarded to:
 
-- The internal `proxy-agent` `ProxyAgent` used for `node:http` and `node:https`.
+- The internal Proxyline Node agent used for `node:http` and `node:https`.
 - The undici `ProxyAgent` (managed) or Proxyline's ambient dispatcher (ambient).
 - The `tls.connect` call inside `openProxyConnectTunnel` when the proxy URL is `https://`.
 

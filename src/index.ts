@@ -1,4 +1,9 @@
 export { openProxyConnectTunnel, type OpenProxyConnectTunnelOptions } from "./connect.js";
+export {
+  createAmbientNodeProxyAgent,
+  hasAmbientNodeProxyConfigured,
+  type AmbientNodeProxyAgentOptions,
+} from "./node-http.js";
 export { installGlobalProxy, installProxyline } from "./runtime.js";
 export {
   ProxylineError,

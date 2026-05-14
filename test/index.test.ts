@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import {
+  createAmbientNodeProxyAgent,
+  hasAmbientNodeProxyConfigured,
   installGlobalProxy,
   installProxyline,
   openProxyConnectTunnel,
@@ -184,6 +186,77 @@ test("ambient mode falls back to ALL_PROXY when protocol proxy scheme is unsuppo
     assert.equal(decision.proxyUrl, "http://fallback.example:8080/");
   } finally {
     proxy.stop();
+  }
+});
+
+test("ambient Node proxy helper only creates an agent when env proxy applies", () => {
+  const inactiveAgent = withProxyEnv({}, () => createAmbientNodeProxyAgent());
+  assert.equal(inactiveAgent, undefined);
+
+  const httpOnlyHttps = withProxyEnv({ HTTP_PROXY: "http://proxy.example:8080" }, () =>
+    createAmbientNodeProxyAgent({ protocol: "https" }),
+  );
+  assert.equal(httpOnlyHttps, undefined);
+
+  const httpsAgent = withProxyEnv({ HTTPS_PROXY: "http://proxy.example:8080" }, () =>
+    createAmbientNodeProxyAgent({ protocol: "https" }),
+  );
+  try {
+    assert.ok(httpsAgent);
+  } finally {
+    httpsAgent?.destroy();
+  }
+
+  const allProxyAgent = withProxyEnv({ ALL_PROXY: "http://proxy.example:8080" }, () =>
+    createAmbientNodeProxyAgent({ protocol: "https" }),
+  );
+  try {
+    assert.ok(allProxyAgent);
+  } finally {
+    allProxyAgent?.destroy();
+  }
+});
+
+test("ambient Node proxy configured helper honors protocol and no-proxy", () => {
+  const hasHttp = withProxyEnv({ HTTP_PROXY: "http://proxy.example:8080" }, () =>
+    hasAmbientNodeProxyConfigured({ protocol: "http" }),
+  );
+  const hasHttps = withProxyEnv({ HTTP_PROXY: "http://proxy.example:8080" }, () =>
+    hasAmbientNodeProxyConfigured({ protocol: "https" }),
+  );
+  const bypassed = withProxyEnv(
+    { HTTPS_PROXY: "http://proxy.example:8080", NO_PROXY: "proxyline.invalid" },
+    () => hasAmbientNodeProxyConfigured({ protocol: "https" }),
+  );
+
+  assert.equal(hasHttp, true);
+  assert.equal(hasHttps, false);
+  assert.equal(bypassed, false);
+});
+
+test("ambient Node proxy helper uses the provided env snapshot for routing", () => {
+  const agent = withProxyEnv({}, () =>
+    createAmbientNodeProxyAgent({
+      env: {
+        HTTP_PROXY: undefined,
+        HTTPS_PROXY: "http://snapshot.example:8080",
+        ALL_PROXY: undefined,
+        NO_PROXY: undefined,
+        http_proxy: undefined,
+        https_proxy: undefined,
+        all_proxy: undefined,
+        no_proxy: undefined,
+      },
+    }),
+  );
+  try {
+    assert.ok(agent);
+    assert.equal(
+      agent.getProxyForUrl("https://api.example.com/", undefined as never),
+      "http://snapshot.example:8080/",
+    );
+  } finally {
+    agent?.destroy();
   }
 });
 

@@ -1,6 +1,5 @@
 import http from "node:http";
 import https from "node:https";
-import { ProxyAgent as NodeProxyAgent } from "proxy-agent";
 import {
   Agent as UndiciAgent,
   Dispatcher,
@@ -26,6 +25,7 @@ import {
   createDirectNodeAgent,
   createNodeProxyAgent,
   type NodeHttpStackSnapshot,
+  type ProxylineNodeProxyAgent,
 } from "./node-http.js";
 import {
   formatUrl,
@@ -45,7 +45,8 @@ import type {
 type RuntimeInstall = {
   installedDispatcher: Dispatcher;
   mode: ProxylineOptions["mode"];
-  nodeAgent: NodeProxyAgent;
+  nodeHttpAgent: ProxylineNodeProxyAgent;
+  nodeHttpsAgent: ProxylineNodeProxyAgent;
   originalDispatcher: Dispatcher;
   originalFetch: typeof globalThis.fetch;
   originalFormData: typeof globalThis.FormData;
@@ -550,7 +551,8 @@ function installRuntime(
     httpsGet: https.get,
     httpsGlobalAgent: https.globalAgent,
   };
-  const nodeAgent = createNodeProxyAgent(resolver, proxyCa);
+  const nodeHttpAgent = createNodeProxyAgent(resolver, proxyCa, "http");
+  const nodeHttpsAgent = createNodeProxyAgent(resolver, proxyCa, "https");
   const originalDispatcher = getGlobalDispatcher();
   const originalFetch = globalThis.fetch;
   const originalFormData = globalThis.FormData;
@@ -561,7 +563,8 @@ function installRuntime(
   const runtime: RuntimeInstall = {
     installedDispatcher,
     mode: dispatcherOptions.mode,
-    nodeAgent,
+    nodeHttpAgent,
+    nodeHttpsAgent,
     originalDispatcher,
     originalFetch,
     originalFormData,
@@ -572,19 +575,19 @@ function installRuntime(
   };
   activeRuntime = runtime;
   try {
-    http.globalAgent = nodeAgent;
-    https.globalAgent = nodeAgent;
+    http.globalAgent = nodeHttpAgent;
+    https.globalAgent = nodeHttpsAgent as unknown as typeof https.globalAgent;
     http.request = bindNodeHttpMethod(snapshot.httpRequest, () =>
-      createNodeProxyAgent(resolver, proxyCa),
+      createNodeProxyAgent(resolver, proxyCa, "http"),
     );
     http.get = bindNodeHttpMethod(snapshot.httpGet, () =>
-      createNodeProxyAgent(resolver, proxyCa),
+      createNodeProxyAgent(resolver, proxyCa, "http"),
     );
     https.request = bindNodeHttpMethod(snapshot.httpsRequest, () =>
-      createNodeProxyAgent(resolver, proxyCa),
+      createNodeProxyAgent(resolver, proxyCa, "https"),
     );
     https.get = bindNodeHttpMethod(snapshot.httpsGet, () =>
-      createNodeProxyAgent(resolver, proxyCa),
+      createNodeProxyAgent(resolver, proxyCa, "https"),
     );
     setGlobalDispatcher(installedDispatcher);
     globalThis.fetch = proxylineFetch;
@@ -602,7 +605,8 @@ function installRuntime(
     globalThis.Response = originalResponse;
     activeRuntime = undefined;
     void installedDispatcher.destroy();
-    nodeAgent.destroy();
+    nodeHttpAgent.destroy();
+    nodeHttpsAgent.destroy();
     throw error;
   }
   return runtime;
@@ -620,7 +624,8 @@ function stopRuntime(runtime: RuntimeInstall): void {
   globalThis.Request = runtime.originalRequest;
   globalThis.Response = runtime.originalResponse;
   void runtime.installedDispatcher.destroy();
-  runtime.nodeAgent.destroy();
+  runtime.nodeHttpAgent.destroy();
+  runtime.nodeHttpsAgent.destroy();
   activeRuntime = undefined;
 }
 

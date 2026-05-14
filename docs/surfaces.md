@@ -16,7 +16,7 @@ Per request, Proxyline:
 1. Copies the call's options object so caller state is not mutated.
 2. Reads TLS-relevant options off any caller-supplied `agent` and lifts them onto the request options (see [TLS identity preservation](#tls-identity-preservation)).
 3. Sets `servername` to the destination hostname when not already set and the hostname is not an IP literal.
-4. Builds a fresh `proxy-agent` `ProxyAgent` for the request and assigns it as `options.agent`.
+4. Builds a fresh Proxyline Node agent for the request and assigns it as `options.agent`.
 5. Deletes any `createConnection` override so callers cannot punch through to the kernel directly.
 6. Destroys the per-request proxy agent when the request closes.
 
@@ -106,6 +106,7 @@ This is intentional: a common bypass is `new https.Agent({ keepAlive: true })` p
 To get a proxy-aware agent without going through the patched globals, use:
 
 - `proxy.createNodeAgent()` — an `http.Agent` that proxies HTTP and HTTPS requests.
+- `createAmbientNodeProxyAgent()` — a standalone ambient helper that returns an agent only when proxy env applies.
 - `proxy.createUndiciDispatcher()` — an undici `Dispatcher` mirroring the current mode.
 - `proxy.createWebSocketAgent()` — an `http.Agent` suitable for WebSocket upgrades.
 
