@@ -221,9 +221,13 @@ function assertSupportedNodeProxyProtocol(proxy: URL): void {
   }
 }
 
-function requestProtocol(req: http.ClientRequest, options: NodeAgentRequestOptions): string {
+function requestProtocol(
+  req: http.ClientRequest,
+  options: NodeAgentRequestOptions,
+  stackProtocol: "http" | "https" | undefined,
+): string {
   const isWebSocket = isWebSocketRequest(req);
-  if (isSecureEndpoint(options)) {
+  if (isSecureEndpoint(options, stackProtocol)) {
     return isWebSocket ? "wss:" : "https:";
   }
   return isWebSocket ? "ws:" : "http:";
@@ -254,12 +258,16 @@ function requestAuthority(options: NodeAgentRequestOptions): string {
   return port === undefined ? authorityHost : `${authorityHost}:${port}`;
 }
 
-function requestUrl(req: http.ClientRequest, options: NodeAgentRequestOptions): string {
+function requestUrl(
+  req: http.ClientRequest,
+  options: NodeAgentRequestOptions,
+  stackProtocol: "http" | "https" | undefined,
+): string {
   if (/^(?:https?|wss?):\/\//i.test(req.path)) {
     return new URL(req.path).href;
   }
   const path = req.path.startsWith("/") ? req.path : `/${req.path}`;
-  return `${requestProtocol(req, options)}//${requestAuthority(options)}${path}`;
+  return `${requestProtocol(req, options, stackProtocol)}//${requestAuthority(options)}${path}`;
 }
 
 function setProxyRequestHeaders(req: http.ClientRequest, proxy: URL, keepAlive: boolean): void {
@@ -277,7 +285,7 @@ function setForwardProxyRequestPath(
   options: NodeAgentRequestOptions,
 ): void {
   req._header = null;
-  req.path = requestUrl(req, options);
+  req.path = requestUrl(req, options, undefined);
 }
 
 function connectToProxy(
@@ -294,8 +302,12 @@ function isWebSocketRequest(req: http.ClientRequest): boolean {
   return String(req.getHeader("upgrade") ?? "").toLowerCase() === "websocket";
 }
 
-function isSecureEndpoint(options: NodeAgentRequestOptions): boolean {
+function isSecureEndpoint(
+  options: NodeAgentRequestOptions,
+  stackProtocol?: "http" | "https",
+): boolean {
   return (
+    stackProtocol === "https" ||
     options.secureEndpoint === true ||
     options.protocol === "https:" ||
     options.protocol === "wss:" ||
@@ -303,8 +315,12 @@ function isSecureEndpoint(options: NodeAgentRequestOptions): boolean {
   );
 }
 
-function shouldTunnelRequest(req: http.ClientRequest, options: NodeAgentRequestOptions): boolean {
-  return isSecureEndpoint(options) || isWebSocketRequest(req);
+function shouldTunnelRequest(
+  req: http.ClientRequest,
+  options: NodeAgentRequestOptions,
+  stackProtocol: "http" | "https" | undefined,
+): boolean {
+  return isSecureEndpoint(options, stackProtocol) || isWebSocketRequest(req);
 }
 
 function splitHostPort(value: string): { host: string; port?: number } {
@@ -711,15 +727,21 @@ export class ProxylineNodeProxyAgent extends http.Agent {
   }
 
   public addRequest(req: http.ClientRequest, options: NodeAgentRequestOptions): void {
-    const url = requestUrl(req, options);
+    const stackProtocol = this.#callStackProtocol();
+    const agentOptions =
+      stackProtocol === "https" && options.secureEndpoint !== true
+        ? { ...options, secureEndpoint: true }
+        : options;
+    const url = requestUrl(req, agentOptions, stackProtocol);
     const proxy = this.#getProxyForUrl(url, req);
     if (!proxy) {
-      (isSecureEndpoint(options) ? this.#httpsAgent : this.#httpAgent).addRequest(req, options);
+      (isSecureEndpoint(agentOptions, stackProtocol) ? this.#httpsAgent : this.#httpAgent)
+        .addRequest(req, agentOptions);
       return;
     }
     const proxyUrl = new URL(proxy);
     assertSupportedNodeProxyProtocol(proxyUrl);
-    const tunnel = shouldTunnelRequest(req, options);
+    const tunnel = shouldTunnelRequest(req, agentOptions, stackProtocol);
     const key = `${tunnel ? "connect" : "forward"}:${proxyUrl.href}`;
     let agent = this.#agents.get(key);
     if (agent === undefined) {
@@ -729,7 +751,7 @@ export class ProxylineNodeProxyAgent extends http.Agent {
       agent = newAgent;
       this.#agents.set(key, agent);
     }
-    agent.addRequest(req, options);
+    agent.addRequest(req, agentOptions);
   }
 
   public override destroy(): void {

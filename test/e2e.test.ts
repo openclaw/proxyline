@@ -355,6 +355,33 @@ test("managed mode uses port 443 for default-port node:https CONNECT targets", a
   });
 });
 
+test("node helper agents route object-form HTTPS requests as secure endpoints", async () => {
+  await withConnectRecorder(async (proxyUrl, authorities) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
+    };
+    const agent = createNodeProxyAgent(resolver, undefined);
+    try {
+      await assert.rejects(
+        readHttpsOptions({
+          agent,
+          hostname: "example.test",
+          path: "/allowed",
+          timeout: 1_000,
+        }),
+      );
+      assert.deepEqual(authorities, ["example.test:443"]);
+    } finally {
+      agent.destroy();
+    }
+  });
+});
+
 test("node helper agents infer default HTTPS ports with stack traces disabled", async () => {
   await withConnectRecorder(async (proxyUrl, authorities) => {
     const resolver: ProxyResolver = {
