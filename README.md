@@ -88,11 +88,14 @@ const socket = await openProxyConnectTunnel({
 ```ts
 import { createAmbientNodeProxyAgent } from "@openclaw/proxyline";
 
-const agent = createAmbientNodeProxyAgent({ protocol: "https" });
+const agent = createAmbientNodeProxyAgent({
+  protocol: "https",
+  proxyTls: { caFile: "/etc/proxy-ca.pem" },
+});
 ```
 
 The helper returns `undefined` when ambient proxy env is not configured, so callers can pass an agent only when needed.
-It uses Proxyline's built-in HTTP/HTTPS Node agent; SOCKS and PAC proxy schemes remain unsupported.
+It uses Proxyline's built-in HTTP/HTTPS Node agent, and `proxyTls` applies only to HTTPS proxy endpoints. SOCKS and PAC proxy schemes remain unsupported.
 
 ## Feature matrix
 

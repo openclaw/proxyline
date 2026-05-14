@@ -27,6 +27,7 @@ type NodeAgentWithOptions = http.Agent & {
   options?: NodeAgentOptions;
 };
 type NodeProxyAgentOptions = NodeAgentOptions & {
+  defaultProtocol?: "http" | "https";
   getProxyForUrl: (url: string, request?: http.ClientRequest) => string;
   proxyTls?: ProxylineTlsOptions;
 };
@@ -498,22 +499,29 @@ class ProxylineConnectAgent extends http.Agent {
 export class ProxylineNodeProxyAgent extends http.Agent {
   public readonly options: NodeAgentOptions;
   readonly #agents = new Map<string, NodeAddRequestAgent>();
+  readonly #defaultProtocol: "http" | "https";
   readonly #getProxyForUrl: (url: string, request?: http.ClientRequest) => string;
   readonly #httpAgent: NodeAddRequestAgent;
   readonly #httpsAgent: NodeAddRequestAgent;
   readonly #proxyTls: ProxylineTlsOptions | undefined;
 
   public constructor(options: NodeProxyAgentOptions) {
-    super(options);
-    this.options = options;
-    this.#getProxyForUrl = options.getProxyForUrl;
-    this.#proxyTls = options.proxyTls;
-    this.#httpAgent = new http.Agent(options) as NodeAddRequestAgent;
-    this.#httpsAgent = new https.Agent(options) as unknown as NodeAddRequestAgent;
+    const { defaultProtocol = "http", getProxyForUrl, proxyTls, ...agentOptions } = options;
+    super(agentOptions);
+    if (nodeAgentDefaultPorts.get(this) === 80) {
+      nodeAgentDefaultPorts.delete(this);
+    }
+    this.options = agentOptions;
+    this.#defaultProtocol = defaultProtocol;
+    this.#getProxyForUrl = getProxyForUrl;
+    this.#proxyTls = proxyTls;
+    this.#httpAgent = new http.Agent(agentOptions) as NodeAddRequestAgent;
+    this.#httpsAgent = new https.Agent(agentOptions) as unknown as NodeAddRequestAgent;
   }
 
   public get defaultPort(): number {
-    return nodeAgentDefaultPorts.get(this) ?? (this.#isSecureEndpoint() ? 443 : 80);
+    return nodeAgentDefaultPorts.get(this) ??
+      (this.#isHttpsCallStack() || this.#defaultProtocol === "https" ? 443 : 80);
   }
 
   public set defaultPort(value: number) {
@@ -521,7 +529,7 @@ export class ProxylineNodeProxyAgent extends http.Agent {
   }
 
   public get protocol(): string {
-    return this.#isSecureEndpoint() ? "https:" : "http:";
+    return this.#isHttpsCallStack() ? "https:" : `${this.#defaultProtocol}:`;
   }
 
   public set protocol(_value: string) {
@@ -532,7 +540,7 @@ export class ProxylineNodeProxyAgent extends http.Agent {
     return this.#getProxyForUrl(url, request);
   }
 
-  #isSecureEndpoint(): boolean {
+  #isHttpsCallStack(): boolean {
     const stack = new Error().stack;
     if (typeof stack !== "string") {
       return false;
@@ -576,8 +584,10 @@ export class ProxylineNodeProxyAgent extends http.Agent {
 export function createNodeProxyAgent(
   resolver: ProxyResolver,
   proxyCa: string | undefined,
+  defaultProtocol: "http" | "https" = "http",
 ): ProxylineNodeProxyAgent {
   return new ProxylineNodeProxyAgent({
+    defaultProtocol,
     getProxyForUrl: resolver.getProxyForUrl,
     ...(proxyCa !== undefined ? { proxyTls: { ca: proxyCa } } : {}),
   });
@@ -592,6 +602,7 @@ export function createDirectNodeAgent(): ProxylineNodeProxyAgent {
 export type AmbientNodeProxyAgentOptions = {
   env?: ProxyEnvSnapshot;
   protocol?: "http" | "https";
+  proxyTls?: ProxylineTlsOptions;
 };
 
 function ambientProbeUrl(protocol: "http" | "https"): string {
@@ -615,6 +626,8 @@ export function createAmbientNodeProxyAgent(
     return undefined;
   }
   return new ProxylineNodeProxyAgent({
+    defaultProtocol: protocol,
     getProxyForUrl: (url) => resolveAmbientProxyForUrl(url, env) ?? "",
+    ...(options.proxyTls !== undefined ? { proxyTls: options.proxyTls } : {}),
   });
 }

@@ -8,7 +8,11 @@ import test from "node:test";
 import { Dispatcher, fetch } from "undici";
 import WebSocket from "ws";
 import { createWebSocketServer } from "./support/ws-server.js";
-import { installGlobalProxy, openProxyConnectTunnel } from "../src/index.js";
+import {
+  createAmbientNodeProxyAgent,
+  installGlobalProxy,
+  openProxyConnectTunnel,
+} from "../src/index.js";
 import { startProxyLab } from "./support/proxy-lab.js";
 
 function withProxyEnv<T>(env: Record<string, string | undefined>, run: () => T): T {
@@ -122,6 +126,33 @@ async function readHttpsOptions(
   });
 }
 
+async function withConnectRecorder<T>(
+  run: (proxyUrl: string, authorities: string[]) => Promise<T>,
+): Promise<T> {
+  const authorities: string[] = [];
+  const proxy = http.createServer();
+  proxy.on("connect", (req, socket) => {
+    authorities.push(req.url ?? "");
+    socket.end("HTTP/1.1 403 Forbidden\r\n\r\n");
+  });
+  proxy.listen(0, "127.0.0.1");
+  await once(proxy, "listening");
+  const address = proxy.address() as AddressInfo;
+  try {
+    return await run(`http://127.0.0.1:${address.port}`, authorities);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      proxy.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+  }
+}
+
 test("ambient mode routes node:http through HTTP_PROXY", async () => {
   const lab = await startProxyLab();
   const proxy = withProxyEnv({ HTTP_PROXY: lab.proxyUrl }, () =>
@@ -191,6 +222,46 @@ test("ambient mode routes node:https through HTTPS_PROXY", async () => {
     assert.ok(lab.events.some((event) => event.type === "connect"));
   } finally {
     proxy.stop();
+    await lab.close();
+  }
+});
+
+test("managed mode uses port 443 for default-port node:https CONNECT targets", async () => {
+  await withConnectRecorder(async (proxyUrl, authorities) => {
+    const proxy = installGlobalProxy({ mode: "managed", proxyUrl });
+    try {
+      await assert.rejects(readHttps("https://example.test/allowed", { timeout: 1_000 }));
+      assert.deepEqual(authorities, ["example.test:443"]);
+    } finally {
+      proxy.stop();
+    }
+  });
+});
+
+test("ambient Node proxy helper trusts HTTPS proxy endpoints with scoped proxy TLS", async () => {
+  const lab = await startProxyLab({ secureProxy: true, secureTarget: true });
+  const proxyCa = lab.proxyCa;
+  const targetCa = lab.targetCa;
+  assert.ok(proxyCa);
+  assert.ok(targetCa);
+  const agent = withProxyEnv({ HTTPS_PROXY: lab.proxyUrl }, () =>
+    createAmbientNodeProxyAgent({
+      protocol: "https",
+      proxyTls: { ca: proxyCa },
+    }),
+  );
+  try {
+    assert.ok(agent);
+    const allowed = await readHttps(`${lab.targetUrl}/allowed`, {
+      agent,
+      ca: targetCa,
+    });
+
+    assert.equal(allowed.status, 200);
+    assert.equal(allowed.body, "allowed via target\n");
+    assert.ok(lab.events.some((event) => event.type === "connect"));
+  } finally {
+    agent?.destroy();
     await lab.close();
   }
 });

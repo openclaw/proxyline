@@ -40,7 +40,10 @@ hasAmbientNodeProxyConfigured({ protocol: "https" });
 Returns a Proxyline-backed Node agent when ambient env proxy settings apply, or `undefined` when no proxy is configured for the requested protocol. This is for libraries that accept a Node `agent` option but should stay direct when the operator has no proxy env configured.
 
 ```ts
-const agent = createAmbientNodeProxyAgent({ protocol: "https" });
+const agent = createAmbientNodeProxyAgent({
+  protocol: "https",
+  proxyTls: { caFile: "/etc/proxy-ca.pem" },
+});
 ```
 
 ### `redactProxyUrl(value: string | URL): string`
@@ -216,8 +219,10 @@ type OpenProxyConnectTunnelOptions = Readonly<{
 type AmbientNodeProxyAgentOptions = {
   env?: ProxyEnvSnapshot;
   protocol?: "http" | "https";
+  proxyTls?: ProxylineTlsOptions;
 };
 ```
 
 - `env` — optional env snapshot. Defaults to reading process env.
 - `protocol` — probe protocol, defaulting to `"https"`.
+- `proxyTls` — CA trust for HTTPS proxy endpoints. See [Proxy TLS](./proxy-tls.md).
