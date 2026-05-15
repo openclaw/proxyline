@@ -1,5 +1,7 @@
 # Changelog
 
+## Unreleased
+
 ## 0.3.0 - 2026-05-15
 
 - Added branded Proxyline dispatcher detection, reusable active-runtime installs, scoped dynamic bypass registration, first-class undici dispatcher tuning options, and a side-effect-light dispatcher detection subpath.
