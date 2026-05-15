@@ -22,6 +22,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./dispatcher-brand": {
+      "types": "./dist/dispatcher-brand.d.ts",
+      "default": "./dist/dispatcher-brand.js"
     }
   },
   "files": [

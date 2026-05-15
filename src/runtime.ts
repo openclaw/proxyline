@@ -43,6 +43,7 @@ import type {
   ProxylineSurface,
   ProxylineUndiciOptions,
 } from "./types.js";
+import { PROXYLINE_DISPATCHER_BRAND } from "./dispatcher-brand.js";
 
 type RuntimeInstall = {
   bypassPolicy: ProxylineBypassPolicy | undefined;
@@ -65,17 +66,9 @@ type RuntimeInstall = {
 let activeRuntime: RuntimeInstall | undefined;
 let activeHandle: ProxylineHandle | undefined;
 
-export const PROXYLINE_DISPATCHER_BRAND = Symbol.for("@openclaw/proxyline.dispatcher");
-
 type ProxylineDispatcher = Dispatcher & {
   [PROXYLINE_DISPATCHER_BRAND]?: true;
 };
-
-export function isProxylineDispatcher(dispatcher: unknown): boolean {
-  return typeof dispatcher === "object" &&
-    dispatcher !== null &&
-    (dispatcher as ProxylineDispatcher)[PROXYLINE_DISPATCHER_BRAND] === true;
-}
 
 // Node's global fetch types come from bundled undici-types, while the runtime
 // implementation intentionally delegates to this package's undici dependency.

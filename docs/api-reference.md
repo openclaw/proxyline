@@ -246,7 +246,7 @@ type ProxylineHandle = Readonly<{
 isProxylineDispatcher(dispatcher: unknown): boolean;
 ```
 
-Returns `true` for Proxyline-owned managed and ambient undici dispatchers. Use this instead of constructor-name checks when integrating with code that also manages undici globals.
+Returns `true` for Proxyline-owned managed and ambient undici dispatchers. Use this instead of constructor-name checks when integrating with code that also manages undici globals. Import from `@openclaw/proxyline/dispatcher-brand` when detection must not load Proxyline's full runtime.
 
 ### `OpenProxyConnectTunnelOptions`
 

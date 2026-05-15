@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Added branded Proxyline dispatcher detection, reusable active-runtime installs, scoped dynamic bypass registration, and first-class undici dispatcher tuning options.
+- Added branded Proxyline dispatcher detection, reusable active-runtime installs, scoped dynamic bypass registration, first-class undici dispatcher tuning options, and a side-effect-light dispatcher detection subpath.
 
 ## 0.2.0 - 2026-05-14
 
