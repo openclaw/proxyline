@@ -28,7 +28,15 @@ let tscBin = resolveTypeScriptCompiler();
 if (!tscBin || !existsSync(tscBin)) {
   run(
     "pnpm",
-    ["add", "--save-dev", "typescript@^5.9.3", "@types/node@^20.19.25", "--ignore-scripts", "--lockfile=false"],
+    [
+      "add",
+      "--save-dev",
+      "typescript@^5.9.3",
+      "@types/node@^20.19.25",
+      "undici@^7.25.0",
+      "--ignore-scripts",
+      "--lockfile=false",
+    ],
     {
       npm_config_lockfile_only: "false",
       PNPM_CONFIG_LOCKFILE_ONLY: "false",
