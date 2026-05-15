@@ -7,6 +7,7 @@ import {
   hasAmbientNodeProxyConfigured,
   installGlobalProxy,
   installProxyline,
+  isProxylineDispatcher,
   openProxyConnectTunnel,
   ProxylineError,
   redactProxyUrl,
@@ -132,6 +133,84 @@ test("managed mode explains bypass policy matches as direct", () => {
     assert.equal(decision.kind, "direct");
     assert.equal(decision.reason, "managed-proxy-bypass-policy");
     assert.equal(decision.proxyUrl, undefined);
+  } finally {
+    proxy.stop();
+  }
+});
+
+test("managed mode supports dynamic scoped bypass registrations", () => {
+  const proxy = installGlobalProxy({
+    mode: "managed",
+    proxyUrl: "https://proxy.example:8443",
+  });
+
+  try {
+    assert.equal(proxy.explain("ws://gateway.localhost:18789/", { surface: "websocket" }).kind, "proxied");
+
+    const result = proxy.withBypass(
+      { url: "ws://gateway.localhost:18789/" },
+      () => proxy.explain("ws://gateway.localhost:18789/", { surface: "websocket" }),
+    );
+
+    assert.equal(result.kind, "direct");
+    assert.equal(result.reason, "managed-proxy-bypass-policy");
+    assert.equal(proxy.explain("ws://gateway.localhost:18789/", { surface: "websocket" }).kind, "proxied");
+  } finally {
+    proxy.stop();
+  }
+});
+
+test("managed mode reuses compatible active runtime and replaces on request", () => {
+  const bypassPolicy = ({ url }: { url: string }) => new URL(url).hostname === "gateway.localhost";
+  const proxy = installGlobalProxy({
+    mode: "managed",
+    proxyUrl: "https://proxy.example:8443",
+    bypassPolicy,
+    undici: { allowH2: false, bodyTimeout: 1_000 },
+  });
+
+  try {
+    const reused = installGlobalProxy({
+      mode: "managed",
+      proxyUrl: "https://proxy.example:8443",
+      bypassPolicy,
+      ifActive: "reuse-compatible",
+      undici: { allowH2: false, bodyTimeout: 1_000 },
+    });
+
+    assert.equal(reused, proxy);
+    assert.throws(
+      () =>
+        installGlobalProxy({
+          mode: "managed",
+          proxyUrl: "https://other-proxy.example:8443",
+          ifActive: "reuse-compatible",
+        }),
+      (error: unknown) =>
+        error instanceof ProxylineError && error.code === "RUNTIME_ALREADY_ACTIVE",
+    );
+
+    const replacement = installGlobalProxy({
+      mode: "managed",
+      proxyUrl: "https://replacement.example:8443",
+      ifActive: "replace",
+    });
+    assert.notEqual(replacement, proxy);
+    assert.equal(replacement.proxyUrl, "https://replacement.example:8443/");
+    replacement.stop();
+  } finally {
+    proxy.stop();
+  }
+});
+
+test("Proxyline undici dispatchers are branded", () => {
+  const proxy = installGlobalProxy({
+    mode: "managed",
+    proxyUrl: "https://proxy.example:8443",
+  });
+
+  try {
+    assert.equal(isProxylineDispatcher(proxy.createUndiciDispatcher()), true);
   } finally {
     proxy.stop();
   }

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added branded Proxyline dispatcher detection, reusable active-runtime installs, scoped dynamic bypass registration, and first-class undici dispatcher tuning options.
+
 ## 0.2.0 - 2026-05-14
 
 - Added ambient Node proxy helper exports and replaced the `proxy-agent` dependency with Proxyline's scoped HTTP/HTTPS Node agent.

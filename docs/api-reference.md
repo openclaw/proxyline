@@ -110,7 +110,9 @@ type ProxylineOptions = Readonly<{
   proxyUrl?: string | URL;
   proxyTls?: ProxylineTlsOptions;
   bypassPolicy?: ProxylineBypassPolicy;
+  ifActive?: "error" | "reuse-compatible" | "replace";
   onEvent?: (event: ProxylineEvent) => void;
+  undici?: ProxylineUndiciOptions;
 }>;
 ```
 
@@ -118,7 +120,25 @@ type ProxylineOptions = Readonly<{
 - `proxyUrl` — required in managed mode, ignored in ambient mode. Managed-mode URLs must be `http://` or `https://`.
 - `proxyTls` — CA trust scoped to the proxy endpoint. See [Proxy TLS](./proxy-tls.md).
 - `bypassPolicy` — managed-mode escape hatch for trusted traffic that should go direct. Ignored in ambient mode.
+- `ifActive` — process singleton behavior when Proxyline is already active. Defaults to `"error"`. `"reuse-compatible"` returns the active handle when mode/proxy/TLS/bypass/undici settings match. `"replace"` stops the active runtime before installing the new one.
 - `onEvent` — callback fired with every `ProxylineEvent`.
+- `undici` — default options for Proxyline-owned undici dispatchers.
+
+### `ProxylineUndiciOptions`
+
+```ts
+type ProxylineUndiciOptions = Readonly<{
+  allowH2?: boolean;
+  bodyTimeout?: number;
+  headersTimeout?: number;
+  connect?: Readonly<{
+    autoSelectFamily?: boolean;
+    autoSelectFamilyAttemptTimeout?: number;
+  }>;
+}>;
+```
+
+These options apply to the global dispatcher installed by `installGlobalProxy()` and to dispatchers returned by `createUndiciDispatcher()`.
 
 ### `ProxylineTlsOptions`
 
@@ -203,7 +223,9 @@ type ProxylineHandle = Readonly<{
   createUndiciDispatcher: () => Dispatcher;
   createWebSocketAgent: () => http.Agent;
   explain: (url: string | URL, options?: ExplainOptions) => ProxylineDecision;
+  registerBypass: (registration: ProxylineBypassRegistration) => () => void;
   stop: () => void;
+  withBypass: <T>(registration: ProxylineBypassRegistration, run: () => T) => T;
 }>;
 ```
 
@@ -214,7 +236,17 @@ type ProxylineHandle = Readonly<{
 - `createUndiciDispatcher()` — proxy-aware undici `Dispatcher`. Returns a direct `UndiciAgent()` when ambient-inactive or after `stop()`.
 - `createWebSocketAgent()` — same as `createNodeAgent()` but typed for WebSocket clients.
 - `explain(url, options?)` — returns a `ProxylineDecision` and emits a `decision` event.
+- `registerBypass({ url, surface? })` — managed-mode scoped bypass. Returns an unregister callback. When `surface` is omitted, the bypass matches any surface for that exact URL.
 - `stop()` — restores the captured Node HTTP(S) stack, undici dispatcher, and fetch globals, destroys Proxyline-owned runtime agents/dispatchers, emits `runtime.stopped`. Idempotent.
+- `withBypass(registration, run)` — registers a bypass only while `run()` executes, then unregisters in `finally`.
+
+### Dispatcher Detection
+
+```ts
+isProxylineDispatcher(dispatcher: unknown): boolean;
+```
+
+Returns `true` for Proxyline-owned managed and ambient undici dispatchers. Use this instead of constructor-name checks when integrating with code that also manages undici globals.
 
 ### `OpenProxyConnectTunnelOptions`
 

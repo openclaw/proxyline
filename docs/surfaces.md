@@ -42,6 +42,7 @@ Some HTTP clients build absolute-form requests themselves (e.g. `path: "https://
 - Proxyline's ambient dispatcher in ambient mode, resolving each request against the current install-time `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` snapshot, with the same `proxyTls`.
 
 The original dispatcher and fetch globals are captured and restored on `stop()`.
+Pass `undici` options to tune Proxyline-owned dispatcher defaults such as `bodyTimeout`, `headersTimeout`, `allowH2`, and `connect.autoSelectFamily`.
 
 ```ts
 import { fetch } from "undici";

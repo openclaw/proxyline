@@ -5,6 +5,7 @@ export {
   type AmbientNodeProxyAgentOptions,
 } from "./node-http.js";
 export { installGlobalProxy, installProxyline } from "./runtime.js";
+export { isProxylineDispatcher, PROXYLINE_DISPATCHER_BRAND } from "./runtime.js";
 export {
   ProxylineError,
   redactProxyUrl,
@@ -13,6 +14,7 @@ export {
 } from "./shared.js";
 export type {
   ExplainOptions,
+  ProxylineBypassRegistration,
   ProxylineBypassPolicy,
   ProxylineBypassRequest,
   ProxylineDecision,
@@ -21,4 +23,5 @@ export type {
   ProxylineMode,
   ProxylineOptions,
   ProxylineSurface,
+  ProxylineUndiciOptions,
 } from "./types.js";

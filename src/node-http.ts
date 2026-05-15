@@ -10,7 +10,7 @@ import {
 } from "./env.js";
 import { formatConnectAuthority } from "./connect.js";
 import { ProxylineError, resolveProxyTlsCa, type ProxylineTlsOptions } from "./shared.js";
-import type { ProxyResolver } from "./types.js";
+import type { ProxylineSurface, ProxyResolver } from "./types.js";
 
 export type NodeHttpRequestOptions = http.RequestOptions & https.RequestOptions & {
   agent?: http.Agent | false;
@@ -35,7 +35,11 @@ type NodeAgentWithOptions = http.Agent & {
 };
 type NodeProxyAgentOptions = NodeAgentOptions & {
   defaultProtocol?: "http" | "https";
-  getProxyForUrl: (url: string, request?: http.ClientRequest) => string;
+  getProxyForUrl: (
+    url: string,
+    surface?: ProxylineSurface,
+    request?: http.ClientRequest,
+  ) => string;
   proxyTls?: ProxylineTlsOptions;
 };
 
@@ -711,7 +715,11 @@ export class ProxylineNodeProxyAgent extends http.Agent {
   public readonly options: NodeAgentOptions;
   readonly #agents = new Map<string, NodeAddRequestAgent>();
   readonly #defaultProtocol: "http" | "https";
-  readonly #getProxyForUrl: (url: string, request?: http.ClientRequest) => string;
+  readonly #getProxyForUrl: (
+    url: string,
+    surface?: ProxylineSurface,
+    request?: http.ClientRequest,
+  ) => string;
   readonly #httpAgent: NodeAddRequestAgent;
   readonly #httpsAgent: NodeAddRequestAgent;
   readonly #proxyTls: ProxylineTlsOptions | undefined;
@@ -749,7 +757,7 @@ export class ProxylineNodeProxyAgent extends http.Agent {
   }
 
   public getProxyForUrl(url: string, request?: http.ClientRequest): string {
-    return this.#getProxyForUrl(url, request);
+    return this.#getProxyForUrl(url, undefined, request);
   }
 
   #callStackProtocol(): "http" | "https" | undefined {
@@ -793,7 +801,8 @@ export class ProxylineNodeProxyAgent extends http.Agent {
         ? { ...options, secureEndpoint: true }
         : options;
     const url = requestDestinationUrl(req, agentOptions, stackProtocol);
-    const proxy = this.#getProxyForUrl(url, req);
+    const surface = isSecureEndpoint(agentOptions, stackProtocol) ? "node-https" : "node-http";
+    const proxy = this.#getProxyForUrl(url, surface, req);
     if (!proxy) {
       (isSecureEndpoint(agentOptions, stackProtocol) ? this.#httpsAgent : this.#httpAgent)
         .addRequest(req, agentOptions);

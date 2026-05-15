@@ -34,15 +34,18 @@ import {
   resolveProxyTlsCa,
 } from "./shared.js";
 import type {
+  ProxylineBypassRegistration,
   ProxylineBypassPolicy,
   ProxylineEvent,
   ProxylineHandle,
   ProxylineOptions,
   ProxyResolver,
   ProxylineSurface,
+  ProxylineUndiciOptions,
 } from "./types.js";
 
 type RuntimeInstall = {
+  bypassPolicy: ProxylineBypassPolicy | undefined;
   installedDispatcher: Dispatcher;
   mode: ProxylineOptions["mode"];
   nodeHttpAgent: ProxylineNodeProxyAgent;
@@ -53,10 +56,26 @@ type RuntimeInstall = {
   originalHeaders: typeof globalThis.Headers;
   originalRequest: typeof globalThis.Request;
   originalResponse: typeof globalThis.Response;
+  proxyCa: string | undefined;
+  proxyUrl: string | undefined;
   snapshot: NodeHttpStackSnapshot;
+  undiciOptions: ProxylineUndiciOptions | undefined;
 };
 
 let activeRuntime: RuntimeInstall | undefined;
+let activeHandle: ProxylineHandle | undefined;
+
+export const PROXYLINE_DISPATCHER_BRAND = Symbol.for("@openclaw/proxyline.dispatcher");
+
+type ProxylineDispatcher = Dispatcher & {
+  [PROXYLINE_DISPATCHER_BRAND]?: true;
+};
+
+export function isProxylineDispatcher(dispatcher: unknown): boolean {
+  return typeof dispatcher === "object" &&
+    dispatcher !== null &&
+    (dispatcher as ProxylineDispatcher)[PROXYLINE_DISPATCHER_BRAND] === true;
+}
 
 // Node's global fetch types come from bundled undici-types, while the runtime
 // implementation intentionally delegates to this package's undici dependency.
@@ -260,18 +279,58 @@ function isProxyableUrlProtocol(protocol: string): boolean {
 
 function shouldBypassManagedProxy(
   bypassPolicy: ProxylineBypassPolicy | undefined,
+  bypasses: DynamicBypassRegistry,
   url: string | URL,
   surface: ProxylineSurface,
 ): boolean {
+  if (bypasses.has(url, surface)) {
+    return true;
+  }
   if (bypassPolicy === undefined) {
     return false;
   }
   return bypassPolicy({ surface, url: formatUrl(url) });
 }
 
+type DynamicBypassRegistry = {
+  add: (registration: ProxylineBypassRegistration) => () => void;
+  has: (url: string | URL, surface: ProxylineSurface) => boolean;
+};
+
+function bypassKey(url: string | URL, surface: ProxylineSurface | undefined): string {
+  return `${surface ?? "*"}\n${formatUrl(url)}`;
+}
+
+function createDynamicBypassRegistry(): DynamicBypassRegistry {
+  const counts = new Map<string, number>();
+  return {
+    add: (registration) => {
+      const key = bypassKey(registration.url, registration.surface);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+      let stopped = false;
+      return () => {
+        if (stopped) {
+          return;
+        }
+        stopped = true;
+        const next = (counts.get(key) ?? 1) - 1;
+        if (next <= 0) {
+          counts.delete(key);
+        } else {
+          counts.set(key, next);
+        }
+      };
+    },
+    has: (url, surface) =>
+      (counts.get(bypassKey(url, surface)) ?? 0) > 0 ||
+      (counts.get(bypassKey(url, undefined)) ?? 0) > 0,
+  };
+}
+
 function createManagedProxyResolver(
   proxyUrl: URL,
   bypassPolicy: ProxylineBypassPolicy | undefined,
+  bypasses: DynamicBypassRegistry,
 ): ProxyResolver {
   const redactedProxyUrl = redactProxyUrl(proxyUrl);
   return {
@@ -287,7 +346,7 @@ function createManagedProxyResolver(
           url: formattedUrl,
         };
       }
-      if (shouldBypassManagedProxy(bypassPolicy, url, surface)) {
+      if (shouldBypassManagedProxy(bypassPolicy, bypasses, url, surface)) {
         return {
           kind: "direct",
           reason: "managed-proxy-bypass-policy",
@@ -303,42 +362,98 @@ function createManagedProxyResolver(
         proxyUrl: redactedProxyUrl,
       };
     },
-    getProxyForUrl: (url) => {
+    getProxyForUrl: (url, surface = "unknown") => {
       const protocol = new URL(url).protocol;
       return isProxyableUrlProtocol(protocol) &&
-        !shouldBypassManagedProxy(bypassPolicy, url, "unknown")
+        !shouldBypassManagedProxy(bypassPolicy, bypasses, url, surface)
         ? proxyUrl.href
         : "";
     },
   };
 }
 
+type UndiciDispatcherOptions = Readonly<{
+  proxyCa: string | undefined;
+  undici: ProxylineUndiciOptions | undefined;
+}>;
+
+function finitePositiveInteger(value: number | undefined): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : undefined;
+}
+
+function resolveUndiciBaseOptions(
+  options: ProxylineUndiciOptions | undefined,
+): Record<string, unknown> {
+  const bodyTimeout = finitePositiveInteger(options?.bodyTimeout);
+  const headersTimeout = finitePositiveInteger(options?.headersTimeout);
+  return {
+    ...(options?.allowH2 !== undefined ? { allowH2: options.allowH2 } : {}),
+    ...(bodyTimeout !== undefined ? { bodyTimeout } : {}),
+    ...(headersTimeout !== undefined ? { headersTimeout } : {}),
+    ...(options?.connect !== undefined
+      ? {
+          connect: {
+            ...(options.connect.autoSelectFamily !== undefined
+              ? { autoSelectFamily: options.connect.autoSelectFamily }
+              : {}),
+            ...(finitePositiveInteger(options.connect.autoSelectFamilyAttemptTimeout) !== undefined
+              ? {
+                  autoSelectFamilyAttemptTimeout: finitePositiveInteger(
+                    options.connect.autoSelectFamilyAttemptTimeout,
+                  ),
+                }
+              : {}),
+          },
+        }
+      : {}),
+  };
+}
+
+function createUndiciAgent(options: ProxylineUndiciOptions | undefined): UndiciAgent {
+  return new UndiciAgent(resolveUndiciBaseOptions(options));
+}
+
+function createUndiciProxyAgent(
+  proxyUrl: string,
+  options: UndiciDispatcherOptions,
+): UndiciProxyAgent {
+  return new UndiciProxyAgent({
+    ...resolveUndiciBaseOptions(options.undici),
+    uri: proxyUrl,
+    ...(options.proxyCa !== undefined ? { proxyTls: { ca: options.proxyCa } } : {}),
+  } as ConstructorParameters<typeof UndiciProxyAgent>[0]);
+}
+
 function createUndiciProxyDispatcher(
   options:
     | { mode: "managed"; resolver: ProxyResolver }
     | { mode: "ambient"; env: ProxyEnvSnapshot; active: boolean },
-  proxyCa: string | undefined,
+  dispatcherOptions: UndiciDispatcherOptions,
 ): Dispatcher {
   if (options.mode === "ambient") {
     if (!options.active) {
-      return new UndiciAgent();
+      return createUndiciAgent(dispatcherOptions.undici);
     }
-    return new AmbientUndiciDispatcher(options.env, proxyCa);
+    return new AmbientUndiciDispatcher(options.env, dispatcherOptions);
   }
-  return new ManagedUndiciDispatcher(options.resolver, proxyCa);
+  return new ManagedUndiciDispatcher(options.resolver, dispatcherOptions);
 }
 
 class ManagedUndiciDispatcher extends Dispatcher {
-  readonly #directDispatcher = new UndiciAgent();
-  readonly #proxyCa: string | undefined;
+  public readonly [PROXYLINE_DISPATCHER_BRAND] = true;
+  readonly #directDispatcher: UndiciAgent;
+  readonly #dispatcherOptions: UndiciDispatcherOptions;
   readonly #proxyDispatchers = new Map<string, UndiciProxyAgent>();
   readonly #resolver: ProxyResolver;
   #closedError: Error | undefined;
 
-  public constructor(resolver: ProxyResolver, proxyCa: string | undefined) {
+  public constructor(resolver: ProxyResolver, dispatcherOptions: UndiciDispatcherOptions) {
     super();
     this.#resolver = resolver;
-    this.#proxyCa = proxyCa;
+    this.#dispatcherOptions = dispatcherOptions;
+    this.#directDispatcher = createUndiciAgent(dispatcherOptions.undici);
   }
 
   public override dispatch(
@@ -353,7 +468,7 @@ class ManagedUndiciDispatcher extends Dispatcher {
       return false;
     }
     const url = resolveUndiciDispatchUrl(options);
-    const proxyUrl = url === undefined ? "" : this.#resolver.getProxyForUrl(url);
+    const proxyUrl = url === undefined ? "" : this.#resolver.getProxyForUrl(url, "undici");
     const dispatcher = proxyUrl === "" ? this.#directDispatcher : this.#proxyDispatcher(proxyUrl);
     return dispatcher.dispatch(options, handler);
   }
@@ -390,10 +505,7 @@ class ManagedUndiciDispatcher extends Dispatcher {
     if (existing !== undefined) {
       return existing;
     }
-    const dispatcher = new UndiciProxyAgent({
-      uri: proxyUrl,
-      ...(this.#proxyCa !== undefined ? { proxyTls: { ca: this.#proxyCa } } : {}),
-    });
+    const dispatcher = createUndiciProxyAgent(proxyUrl, this.#dispatcherOptions);
     this.#proxyDispatchers.set(proxyUrl, dispatcher);
     return dispatcher;
   }
@@ -420,16 +532,18 @@ class ManagedUndiciDispatcher extends Dispatcher {
 }
 
 class AmbientUndiciDispatcher extends Dispatcher {
-  readonly #directDispatcher = new UndiciAgent();
+  public readonly [PROXYLINE_DISPATCHER_BRAND] = true;
+  readonly #directDispatcher: UndiciAgent;
+  readonly #dispatcherOptions: UndiciDispatcherOptions;
   readonly #env: ProxyEnvSnapshot;
-  readonly #proxyCa: string | undefined;
   readonly #proxyDispatchers = new Map<string, UndiciProxyAgent>();
   #closedError: Error | undefined;
 
-  public constructor(env: ProxyEnvSnapshot, proxyCa: string | undefined) {
+  public constructor(env: ProxyEnvSnapshot, dispatcherOptions: UndiciDispatcherOptions) {
     super();
     this.#env = env;
-    this.#proxyCa = proxyCa;
+    this.#dispatcherOptions = dispatcherOptions;
+    this.#directDispatcher = createUndiciAgent(dispatcherOptions.undici);
   }
 
   public override dispatch(
@@ -445,8 +559,7 @@ class AmbientUndiciDispatcher extends Dispatcher {
     }
     const url = resolveUndiciDispatchUrl(options);
     const proxyUrl = url === undefined ? undefined : resolveAmbientProxyForUrl(url, this.#env);
-    const dispatcher =
-      proxyUrl === undefined ? this.#directDispatcher : this.#proxyDispatcher(proxyUrl);
+    const dispatcher = proxyUrl === undefined ? this.#directDispatcher : this.#proxyDispatcher(proxyUrl);
     return dispatcher.dispatch(options, handler);
   }
 
@@ -482,10 +595,7 @@ class AmbientUndiciDispatcher extends Dispatcher {
     if (existing !== undefined) {
       return existing;
     }
-    const dispatcher = new UndiciProxyAgent({
-      uri: proxyUrl,
-      ...(this.#proxyCa !== undefined ? { proxyTls: { ca: this.#proxyCa } } : {}),
-    });
+    const dispatcher = createUndiciProxyAgent(proxyUrl, this.#dispatcherOptions);
     this.#proxyDispatchers.set(proxyUrl, dispatcher);
     return dispatcher;
   }
@@ -539,6 +649,11 @@ function installRuntime(
     | { mode: "managed"; resolver: ProxyResolver }
     | { mode: "ambient"; env: ProxyEnvSnapshot; active: boolean },
   proxyCa: string | undefined,
+  options: {
+    bypassPolicy: ProxylineBypassPolicy | undefined;
+    proxyUrl: URL | undefined;
+    undici: ProxylineUndiciOptions | undefined;
+  },
 ): RuntimeInstall {
   if (activeRuntime !== undefined) {
     throw new ProxylineError("RUNTIME_ALREADY_ACTIVE", "Proxyline already has an active runtime.");
@@ -559,8 +674,12 @@ function installRuntime(
   const originalHeaders = globalThis.Headers;
   const originalRequest = globalThis.Request;
   const originalResponse = globalThis.Response;
-  const installedDispatcher = createUndiciProxyDispatcher(dispatcherOptions, proxyCa);
+  const installedDispatcher = createUndiciProxyDispatcher(dispatcherOptions, {
+    proxyCa,
+    undici: options.undici,
+  });
   const runtime: RuntimeInstall = {
+    bypassPolicy: options.bypassPolicy,
     installedDispatcher,
     mode: dispatcherOptions.mode,
     nodeHttpAgent,
@@ -571,7 +690,10 @@ function installRuntime(
     originalHeaders,
     originalRequest,
     originalResponse,
+    proxyCa,
+    proxyUrl: options.proxyUrl?.href,
     snapshot,
+    undiciOptions: options.undici,
   };
   activeRuntime = runtime;
   try {
@@ -627,6 +749,7 @@ function stopRuntime(runtime: RuntimeInstall): void {
   runtime.nodeHttpAgent.destroy();
   runtime.nodeHttpsAgent.destroy();
   activeRuntime = undefined;
+  activeHandle = undefined;
 }
 
 export function installProxyline(options: ProxylineOptions): ProxylineHandle {
@@ -638,12 +761,35 @@ export function installProxyline(options: ProxylineOptions): ProxylineHandle {
     );
   }
 
+  const activePolicy = options.ifActive ?? "error";
+  if (activeRuntime !== undefined) {
+    if (activePolicy === "replace") {
+      activeHandle?.stop();
+    } else if (
+      activePolicy === "reuse-compatible" &&
+      activeHandle !== undefined &&
+      activeRuntime.mode === options.mode &&
+      activeRuntime.proxyUrl === proxyUrl?.href &&
+      activeRuntime.proxyCa === resolveProxyTlsCa(options.proxyTls) &&
+      activeRuntime.bypassPolicy === options.bypassPolicy &&
+      JSON.stringify(activeRuntime.undiciOptions ?? {}) === JSON.stringify(options.undici ?? {})
+    ) {
+      return activeHandle;
+    } else {
+      throw new ProxylineError(
+        "RUNTIME_ALREADY_ACTIVE",
+        "Proxyline already has an active runtime.",
+      );
+    }
+  }
+
   let stopped = false;
   const proxyCa = resolveProxyTlsCa(options.proxyTls);
   const ambientEnv = proxyUrl === undefined ? readProxyEnv() : undefined;
+  const dynamicBypasses = createDynamicBypassRegistry();
   const resolver =
     proxyUrl !== undefined
-      ? createManagedProxyResolver(proxyUrl, options.bypassPolicy)
+      ? createManagedProxyResolver(proxyUrl, options.bypassPolicy, dynamicBypasses)
       : createAmbientProxyResolver(ambientEnv ?? EMPTY_PROXY_ENV);
   const redactedProxyUrl = resolver.describeProxy();
   const hasActiveProxy = resolver.active;
@@ -654,6 +800,11 @@ export function installProxyline(options: ProxylineOptions): ProxylineHandle {
           ? { mode: "managed", resolver }
           : { mode: "ambient", env: ambientEnv ?? EMPTY_PROXY_ENV, active: hasActiveProxy },
         proxyCa,
+        {
+          bypassPolicy: options.bypassPolicy,
+          proxyUrl,
+          undici: options.undici,
+        },
       )
     : undefined;
   emit(options.onEvent, {
@@ -675,12 +826,12 @@ export function installProxyline(options: ProxylineOptions): ProxylineHandle {
     },
     createUndiciDispatcher: () =>
       stopped
-        ? new UndiciAgent()
+        ? createUndiciAgent(options.undici)
         : createUndiciProxyDispatcher(
             proxyUrl !== undefined
               ? { mode: "managed", resolver }
               : { mode: "ambient", env: ambientEnv ?? EMPTY_PROXY_ENV, active: hasActiveProxy },
-            proxyCa,
+            { proxyCa, undici: options.undici },
           ),
     createWebSocketAgent: () => {
       if (!hasActiveProxy || stopped) {
@@ -701,6 +852,12 @@ export function installProxyline(options: ProxylineOptions): ProxylineHandle {
       emit(options.onEvent, { type: "decision", decision });
       return decision;
     },
+    registerBypass: (registration) => {
+      if (stopped || proxyUrl === undefined) {
+        return () => {};
+      }
+      return dynamicBypasses.add(registration);
+    },
     stop: () => {
       if (stopped) {
         return;
@@ -711,8 +868,17 @@ export function installProxyline(options: ProxylineOptions): ProxylineHandle {
       }
       emit(options.onEvent, { type: "runtime.stopped", mode: options.mode });
     },
+    withBypass: (registration, run) => {
+      const unregister = handle.registerBypass(registration);
+      try {
+        return run();
+      } finally {
+        unregister();
+      }
+    },
   };
 
+  activeHandle = hasActiveProxy ? handle : activeHandle;
   return handle;
 }
 
