@@ -7,10 +7,6 @@ settings:
 importers:
 
   .:
-    dependencies:
-      undici:
-        specifier: ^7.25.0
-        version: 7.25.0
     devDependencies:
       '@types/node':
         specifier: ^20.19.40
@@ -24,6 +20,9 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+      undici:
+        specifier: ^7.25.0
+        version: 7.25.0
       ws:
         specifier: ^8.20.0
         version: 8.20.0

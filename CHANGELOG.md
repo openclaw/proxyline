@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Added branded Proxyline dispatcher detection, reusable active-runtime installs, scoped dynamic bypass registration, first-class undici dispatcher tuning options, and a side-effect-light dispatcher detection subpath.
+- Moved `undici` to a peer dependency so host applications share one global dispatcher runtime with Proxyline.
 
 ## 0.2.0 - 2026-05-14
 
