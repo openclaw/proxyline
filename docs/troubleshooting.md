@@ -10,7 +10,7 @@ You used `mode: "managed"` without `proxyUrl`. Managed mode does not fall back t
 
 ## `ProxylineError: RUNTIME_ALREADY_ACTIVE`
 
-Two parts of your code called `installProxyline` without an intervening `stop()`. Find the existing handle and reuse it, or call `stop()` before the second install. Common causes: test setup that re-installs on every test, double-invoked entry points, hot-reload tooling that re-evaluates the entry module.
+Two parts of your code called `installProxyline` without an intervening `stop()` or compatible `ifActive` policy. Find the existing handle and reuse it, pass `ifActive: "reuse-compatible"` when the settings should match, or call `stop()` before the second install. Common causes: test setup that re-installs on every test, double-invoked entry points, hot-reload tooling that re-evaluates the entry module.
 
 ## `ProxylineError: CONNECT_FAILED`
 

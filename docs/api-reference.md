@@ -10,7 +10,7 @@ Aliased as `installGlobalProxy`. Installs the runtime and returns a handle.
 
 - Throws `ProxylineError` with code `MANAGED_PROXY_URL_REQUIRED` if `mode: "managed"` is used without a `proxyUrl`.
 - Throws `ProxylineError` with code `UNSUPPORTED_PROXY_PROTOCOL` if managed-mode `proxyUrl` is not `http://` or `https://`.
-- Throws `ProxylineError` with code `RUNTIME_ALREADY_ACTIVE` if another Proxyline runtime is already installed in the same process.
+- Throws `ProxylineError` with code `RUNTIME_ALREADY_ACTIVE` if another Proxyline runtime is already installed and `ifActive` is omitted or cannot safely reuse the active runtime.
 
 In managed mode (and active ambient mode), `installProxyline`:
 
@@ -120,7 +120,7 @@ type ProxylineOptions = Readonly<{
 - `proxyUrl` — required in managed mode, ignored in ambient mode. Managed-mode URLs must be `http://` or `https://`.
 - `proxyTls` — CA trust scoped to the proxy endpoint. See [Proxy TLS](./proxy-tls.md).
 - `bypassPolicy` — managed-mode escape hatch for trusted traffic that should go direct. Ignored in ambient mode.
-- `ifActive` — process singleton behavior when Proxyline is already active. Defaults to `"error"`. `"reuse-compatible"` returns the active handle when mode/proxy/TLS/bypass/undici settings match. `"replace"` stops the active runtime before installing the new one.
+- `ifActive` — process singleton behavior when Proxyline is already active. Defaults to `"error"`. `"reuse-compatible"` returns the active handle when mode/proxy/TLS/bypass/undici settings match; ambient mode also requires the captured proxy env snapshot to match. `"replace"` stops the active runtime before installing the new one.
 - `onEvent` — callback fired with every `ProxylineEvent`.
 - `undici` — default options for Proxyline-owned undici dispatchers.
 
@@ -238,7 +238,7 @@ type ProxylineHandle = Readonly<{
 - `explain(url, options?)` — returns a `ProxylineDecision` and emits a `decision` event.
 - `registerBypass({ url, surface? })` — managed-mode scoped bypass. Returns an unregister callback. When `surface` is omitted, the bypass matches any surface for that exact URL.
 - `stop()` — restores the captured Node HTTP(S) stack, undici dispatcher, and fetch globals, destroys Proxyline-owned runtime agents/dispatchers, emits `runtime.stopped`. Idempotent.
-- `withBypass(registration, run)` — registers a bypass only while `run()` executes, then unregisters in `finally`.
+- `withBypass(registration, run)` — registers a bypass while `run()` executes. If `run()` returns a promise, unregisters after that promise settles.
 
 ### Dispatcher Detection
 

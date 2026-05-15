@@ -38,7 +38,7 @@ Some HTTP clients build absolute-form requests themselves (e.g. `path: "https://
 
 `installGlobalProxy` calls `undici.setGlobalDispatcher` and patches `globalThis.fetch` to use Proxyline's dispatcher with:
 
-- `undici.ProxyAgent` in managed mode, pointed at `proxyUrl` and trusting `proxyTls` when supplied.
+- Proxyline's managed dispatcher in managed mode, backed by `undici.ProxyAgent` instances pointed at `proxyUrl` and trusting `proxyTls` when supplied.
 - Proxyline's ambient dispatcher in ambient mode, resolving each request against the current install-time `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` snapshot, with the same `proxyTls`.
 
 The original dispatcher and fetch globals are captured and restored on `stop()`.

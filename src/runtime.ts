@@ -46,6 +46,7 @@ import type {
 import { PROXYLINE_DISPATCHER_BRAND } from "./dispatcher-brand.js";
 
 type RuntimeInstall = {
+  ambientEnv: ProxyEnvSnapshot | undefined;
   bypassPolicy: ProxylineBypassPolicy | undefined;
   installedDispatcher: Dispatcher;
   mode: ProxylineOptions["mode"];
@@ -320,6 +321,10 @@ function createDynamicBypassRegistry(): DynamicBypassRegistry {
   };
 }
 
+function proxyEnvSnapshotKey(env: ProxyEnvSnapshot | undefined): string {
+  return JSON.stringify(env ?? EMPTY_PROXY_ENV);
+}
+
 function createManagedProxyResolver(
   proxyUrl: URL,
   bypassPolicy: ProxylineBypassPolicy | undefined,
@@ -370,6 +375,12 @@ type UndiciDispatcherOptions = Readonly<{
   undici: ProxylineUndiciOptions | undefined;
 }>;
 
+function finiteNonNegativeInteger(value: number | undefined): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : undefined;
+}
+
 function finitePositiveInteger(value: number | undefined): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value > 0
     ? Math.floor(value)
@@ -379,8 +390,8 @@ function finitePositiveInteger(value: number | undefined): number | undefined {
 function resolveUndiciBaseOptions(
   options: ProxylineUndiciOptions | undefined,
 ): Record<string, unknown> {
-  const bodyTimeout = finitePositiveInteger(options?.bodyTimeout);
-  const headersTimeout = finitePositiveInteger(options?.headersTimeout);
+  const bodyTimeout = finiteNonNegativeInteger(options?.bodyTimeout);
+  const headersTimeout = finiteNonNegativeInteger(options?.headersTimeout);
   return {
     ...(options?.allowH2 !== undefined ? { allowH2: options.allowH2 } : {}),
     ...(bodyTimeout !== undefined ? { bodyTimeout } : {}),
@@ -643,6 +654,7 @@ function installRuntime(
     | { mode: "ambient"; env: ProxyEnvSnapshot; active: boolean },
   proxyCa: string | undefined,
   options: {
+    ambientEnv: ProxyEnvSnapshot | undefined;
     bypassPolicy: ProxylineBypassPolicy | undefined;
     proxyUrl: URL | undefined;
     undici: ProxylineUndiciOptions | undefined;
@@ -672,6 +684,7 @@ function installRuntime(
     undici: options.undici,
   });
   const runtime: RuntimeInstall = {
+    ambientEnv: options.ambientEnv,
     bypassPolicy: options.bypassPolicy,
     installedDispatcher,
     mode: dispatcherOptions.mode,
@@ -747,6 +760,7 @@ function stopRuntime(runtime: RuntimeInstall): void {
 
 export function installProxyline(options: ProxylineOptions): ProxylineHandle {
   const proxyUrl = options.mode === "managed" ? normalizeProxyUrl(options.proxyUrl) : undefined;
+  const ambientEnv = proxyUrl === undefined ? readProxyEnv() : undefined;
   if (options.mode === "managed" && proxyUrl === undefined) {
     throw new ProxylineError(
       "MANAGED_PROXY_URL_REQUIRED",
@@ -763,6 +777,7 @@ export function installProxyline(options: ProxylineOptions): ProxylineHandle {
       activeHandle !== undefined &&
       activeRuntime.mode === options.mode &&
       activeRuntime.proxyUrl === proxyUrl?.href &&
+      proxyEnvSnapshotKey(activeRuntime.ambientEnv) === proxyEnvSnapshotKey(ambientEnv) &&
       activeRuntime.proxyCa === resolveProxyTlsCa(options.proxyTls) &&
       activeRuntime.bypassPolicy === options.bypassPolicy &&
       JSON.stringify(activeRuntime.undiciOptions ?? {}) === JSON.stringify(options.undici ?? {})
@@ -778,7 +793,6 @@ export function installProxyline(options: ProxylineOptions): ProxylineHandle {
 
   let stopped = false;
   const proxyCa = resolveProxyTlsCa(options.proxyTls);
-  const ambientEnv = proxyUrl === undefined ? readProxyEnv() : undefined;
   const dynamicBypasses = createDynamicBypassRegistry();
   const resolver =
     proxyUrl !== undefined
@@ -794,6 +808,7 @@ export function installProxyline(options: ProxylineOptions): ProxylineHandle {
           : { mode: "ambient", env: ambientEnv ?? EMPTY_PROXY_ENV, active: hasActiveProxy },
         proxyCa,
         {
+          ambientEnv,
           bypassPolicy: options.bypassPolicy,
           proxyUrl,
           undici: options.undici,
@@ -864,9 +879,16 @@ export function installProxyline(options: ProxylineOptions): ProxylineHandle {
     withBypass: (registration, run) => {
       const unregister = handle.registerBypass(registration);
       try {
-        return run();
-      } finally {
+        const result = run();
+        if (isPromiseLike(result)) {
+          void Promise.resolve(result).then(unregister, unregister);
+          return result;
+        }
         unregister();
+        return result;
+      } catch (error) {
+        unregister();
+        throw error;
       }
     },
   };
@@ -876,3 +898,9 @@ export function installProxyline(options: ProxylineOptions): ProxylineHandle {
 }
 
 export const installGlobalProxy = installProxyline;
+
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+  return typeof value === "object" &&
+    value !== null &&
+    typeof (value as { then?: unknown }).then === "function";
+}

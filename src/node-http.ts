@@ -335,6 +335,17 @@ function shouldTunnelRequest(
   return isSecureEndpoint(options, stackProtocol) || isWebSocketRequest(req);
 }
 
+function requestSurface(
+  req: http.ClientRequest,
+  options: NodeAgentRequestOptions,
+  stackProtocol: "http" | "https" | undefined,
+): ProxylineSurface {
+  if (isWebSocketRequest(req)) {
+    return "websocket";
+  }
+  return isSecureEndpoint(options, stackProtocol) ? "node-https" : "node-http";
+}
+
 function splitHostPort(value: string): { host: string; port?: number } {
   const bracketed = value.match(/^\[([^\]]+)\](?::(\d+))?$/);
   if (bracketed) {
@@ -801,7 +812,7 @@ export class ProxylineNodeProxyAgent extends http.Agent {
         ? { ...options, secureEndpoint: true }
         : options;
     const url = requestDestinationUrl(req, agentOptions, stackProtocol);
-    const surface = isSecureEndpoint(agentOptions, stackProtocol) ? "node-https" : "node-http";
+    const surface = requestSurface(req, agentOptions, stackProtocol);
     const proxy = this.#getProxyForUrl(url, surface, req);
     if (!proxy) {
       (isSecureEndpoint(agentOptions, stackProtocol) ? this.#httpsAgent : this.#httpAgent)

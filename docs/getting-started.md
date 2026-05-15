@@ -68,7 +68,7 @@ See [Modes](./modes.md) for the full posture contract and [Environment Variables
 
 ## Shutdown
 
-Call `proxy.stop()` from your shutdown path (and from tests). It restores the saved Node HTTP(S) methods and global agents, restores the previous undici global dispatcher and fetch globals, and destroys the internal proxy agent. Only one Proxyline runtime can be active at a time; install will throw `RUNTIME_ALREADY_ACTIVE` otherwise.
+Call `proxy.stop()` from your shutdown path (and from tests). It restores the saved Node HTTP(S) methods and global agents, restores the previous undici global dispatcher and fetch globals, and destroys the internal proxy agent. Only one Proxyline runtime can be active at a time; a second install throws `RUNTIME_ALREADY_ACTIVE` by default unless you opt into compatible reuse or replacement with `ifActive`.
 
 ```ts
 process.once("SIGTERM", () => proxy.stop());

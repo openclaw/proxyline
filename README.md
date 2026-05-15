@@ -21,7 +21,7 @@ Website: [proxyline.dev](https://proxyline.dev)
 - **Embeddable runtime controls.** `ifActive` handles process singleton reuse/replacement, `undici` options tune dispatcher defaults, and `isProxylineDispatcher()` identifies Proxyline-owned dispatchers without constructor-name checks.
 - **Scoped proxy CA trust.** `proxyTls.ca` / `proxyTls.caFile` trust a private CA for the proxy endpoint only — no `NODE_EXTRA_CA_CERTS` and no `NODE_TLS_REJECT_UNAUTHORIZED=0`.
 - **Observable.** `proxy.explain(url)` returns a structured decision (`proxied` / `direct` with a `reason`), and an `onEvent` callback receives `runtime.installed`, `runtime.stopped`, and per-decision events. Proxy URLs are credential-redacted.
-- **Restoreable.** `proxy.stop()` restores the captured Node HTTP(S) methods, global agents, undici dispatcher, and fetch globals. The runtime is a process-wide singleton — a second install throws `RUNTIME_ALREADY_ACTIVE`.
+- **Restoreable.** `proxy.stop()` restores the captured Node HTTP(S) methods, global agents, undici dispatcher, and fetch globals. The runtime is a process-wide singleton; by default a second active install throws `RUNTIME_ALREADY_ACTIVE`, while `ifActive` can reuse or replace intentionally.
 
 ## Install
 

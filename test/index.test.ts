@@ -70,6 +70,13 @@ function closedDispatchHandler(onError?: (error: Error) => void): Dispatcher.Dis
   };
 }
 
+function undiciAgentOptions(dispatcher: Dispatcher): Record<string, unknown> {
+  const optionsSymbol = Object.getOwnPropertySymbols(dispatcher)
+    .find((symbol) => symbol.description === "options");
+  assert.ok(optionsSymbol);
+  return (dispatcher as unknown as Record<symbol, unknown>)[optionsSymbol] as Record<string, unknown>;
+}
+
 test("managed mode requires an explicit proxy URL", () => {
   assert.throws(
     () => installProxyline({ mode: "managed" }),
@@ -160,6 +167,50 @@ test("managed mode supports dynamic scoped bypass registrations", () => {
   }
 });
 
+test("managed mode keeps dynamic bypass active for async callbacks", async () => {
+  const proxy = installGlobalProxy({
+    mode: "managed",
+    proxyUrl: "https://proxy.example:8443",
+  });
+
+  try {
+    const result = await proxy.withBypass(
+      { url: "ws://gateway.localhost:18789/" },
+      async () => {
+        await Promise.resolve();
+        return proxy.explain("ws://gateway.localhost:18789/", { surface: "websocket" });
+      },
+    );
+
+    assert.equal(result.kind, "direct");
+    assert.equal(result.reason, "managed-proxy-bypass-policy");
+    assert.equal(proxy.explain("ws://gateway.localhost:18789/", { surface: "websocket" }).kind, "proxied");
+  } finally {
+    proxy.stop();
+  }
+});
+
+test("managed mode withBypass preserves promise-like callback results", async () => {
+  const proxy = installGlobalProxy({
+    mode: "managed",
+    proxyUrl: "https://proxy.example:8443",
+  });
+
+  try {
+    const callbackPromise = Promise.resolve()
+      .then(() => proxy.explain("ws://gateway.localhost:18789/", { surface: "websocket" }));
+    const result = proxy.withBypass(
+      { url: "ws://gateway.localhost:18789/" },
+      () => callbackPromise,
+    );
+
+    assert.equal(result, callbackPromise);
+    assert.equal((await result).kind, "direct");
+  } finally {
+    proxy.stop();
+  }
+});
+
 test("managed mode reuses compatible active runtime and replaces on request", () => {
   const bypassPolicy = ({ url }: { url: string }) => new URL(url).hostname === "gateway.localhost";
   const proxy = installGlobalProxy({
@@ -203,6 +254,23 @@ test("managed mode reuses compatible active runtime and replaces on request", ()
   }
 });
 
+test("ambient mode rejects compatible reuse when env snapshot changes", () => {
+  withProxyEnv({ HTTP_PROXY: "http://old-proxy.example:8080" }, () => {
+    const proxy = installGlobalProxy({ mode: "ambient" });
+    try {
+      process.env.HTTP_PROXY = "http://new-proxy.example:8080";
+
+      assert.throws(
+        () => installGlobalProxy({ mode: "ambient", ifActive: "reuse-compatible" }),
+        (error: unknown) =>
+          error instanceof ProxylineError && error.code === "RUNTIME_ALREADY_ACTIVE",
+      );
+    } finally {
+      proxy.stop();
+    }
+  });
+});
+
 test("Proxyline undici dispatchers are branded", () => {
   const proxy = installGlobalProxy({
     mode: "managed",
@@ -213,6 +281,25 @@ test("Proxyline undici dispatchers are branded", () => {
     assert.equal(isProxylineDispatcher(proxy.createUndiciDispatcher()), true);
   } finally {
     proxy.stop();
+  }
+});
+
+test("stopped helper undici dispatchers preserve zero timeout options", async () => {
+  const proxy = installGlobalProxy({
+    mode: "managed",
+    proxyUrl: "https://proxy.example:8443",
+    undici: { bodyTimeout: 0, headersTimeout: 0 },
+  });
+  proxy.stop();
+
+  const dispatcher = proxy.createUndiciDispatcher();
+  try {
+    const options = undiciAgentOptions(dispatcher);
+
+    assert.equal(options.bodyTimeout, 0);
+    assert.equal(options.headersTimeout, 0);
+  } finally {
+    await dispatcher.close();
   }
 });
 

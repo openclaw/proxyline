@@ -54,7 +54,7 @@ await import("./app.js");
 
 ## Process-wide singleton
 
-Only one Proxyline runtime can be installed at a time. A second `installProxyline` call throws `ProxylineError` with code `RUNTIME_ALREADY_ACTIVE`. Call `proxy.stop()` to restore originals before installing a new runtime.
+Only one Proxyline runtime can be installed at a time. A second `installProxyline` call throws `ProxylineError` with code `RUNTIME_ALREADY_ACTIVE` by default. Use `ifActive: "reuse-compatible"` to share the current matching runtime, `ifActive: "replace"` to stop and reinstall intentionally, or call `proxy.stop()` yourself before installing a different runtime.
 
 This is deliberate: two competing proxy patches would race on `http.request` and `globalAgent`, and the loser would silently bypass the winner.
 

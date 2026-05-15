@@ -1682,6 +1682,38 @@ test("managed mode routes ws clients through the global node:http patch", async 
   }
 });
 
+test("managed mode classifies WebSocket upgrades for scoped bypass policy", async () => {
+  const lab = await startProxyLab();
+  const wsServer = await createWebSocketServer();
+  const wsHost = new URL(wsServer.url).host;
+  const proxy = installGlobalProxy({
+    mode: "managed",
+    proxyUrl: lab.proxyUrl,
+    bypassPolicy: ({ surface, url }) =>
+      surface === "websocket" && new URL(url).host === wsHost,
+  });
+  try {
+    const ws = new WebSocket(wsServer.url);
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", () => {
+        ws.send("ping");
+      });
+      ws.once("message", (data) => {
+        assert.equal(data.toString(), "echo:ping");
+        resolve();
+      });
+      ws.once("error", reject);
+    });
+    ws.close();
+
+    assert.equal(lab.events.length, 0);
+  } finally {
+    proxy.stop();
+    await wsServer.close();
+    await lab.close();
+  }
+});
+
 test("CONNECT helper trusts an HTTPS proxy endpoint with scoped CA", async () => {
   const lab = await startProxyLab({ secureProxy: true });
   const proxyCa = lab.proxyCa;
