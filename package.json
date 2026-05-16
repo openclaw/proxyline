@@ -32,13 +32,19 @@
     "dist/*.js",
     "dist/*.d.ts",
     "dist/*.d.ts.map",
+    "src/**/*.ts",
+    "docs/*.md",
+    "docs/CNAME",
+    "scripts/prepack-build.mjs",
+    "tsconfig.json",
+    "tsconfig.build.json",
     "CHANGELOG.md",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "check": "pnpm build && tsc --noEmit && pnpm coverage:run",
+    "check": "pnpm build && tsc --noEmit && pnpm coverage:run && tsx --test test/package-artifact.test.ts",
     "coverage": "pnpm build && pnpm coverage:run",
     "coverage:run": "node scripts/run-coverage.mjs",
     "docs:build": "node scripts/build-docs-site.mjs",
@@ -46,7 +52,7 @@
     "prepack": "node scripts/prepack-build.mjs",
     "prepare": "node scripts/prepack-build.mjs",
     "publish:dry-run": "pnpm publish --dry-run --access public",
-    "test": "pnpm build && tsx --test test/index.test.ts test/e2e.test.ts test/package.test.ts",
+    "test": "pnpm build && tsx --test test/index.test.ts test/e2e.test.ts test/package.test.ts test/scripts.test.ts && tsx --test test/package-artifact.test.ts",
     "typecheck": "pnpm build && tsc --noEmit"
   },
   "devDependencies": {

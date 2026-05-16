@@ -5,6 +5,7 @@ const tests = [
   "test/index.test.ts",
   "test/e2e.test.ts",
   "test/package.test.ts",
+  "test/scripts.test.ts",
 ];
 
 const coverageArgs = [

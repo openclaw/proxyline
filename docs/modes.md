@@ -9,7 +9,7 @@ Managed mode treats proxy routing as a security policy.
 - `proxyUrl` is **required**. Omitting it throws `ProxylineError` with code `MANAGED_PROXY_URL_REQUIRED`.
 - Only `http://` and `https://` proxy endpoints are accepted. Other schemes throw `UNSUPPORTED_PROXY_PROTOCOL`.
 - The managed proxy is forced for HTTP(S) and WS(S) requests on the patched surfaces.
-- `bypassPolicy`, `registerBypass()`, and `withBypass()` are the managed-mode direct-routing escape hatches. They match `{ surface, url }` and intentionally send matching requests direct.
+- `bypassPolicy`, `registerBypass()`, and `withBypass()` are the managed-mode direct-routing escape hatches. They match `{ surface, url }` and intentionally send matching requests direct. `registerBypass()` is process-wide until unregistered; `withBypass()` is limited to the callback's async context.
 - Caller-supplied `http.Agent` or `https.Agent` values are replaced per request. TLS-relevant agent options (`ca`, `cert`, `key`, `ciphers`, `minVersion`, `maxVersion`, `rejectUnauthorized`, etc.) are copied onto the proxy request so destination TLS identity is preserved. See [Surfaces — TLS identity preservation](./surfaces.md#tls-identity-preservation) for the full list.
 - The undici global dispatcher is replaced with Proxyline's managed dispatcher, backed by `undici.ProxyAgent` instances pointed at `proxyUrl`.
 - Environment variables (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, ...) are **ignored**.

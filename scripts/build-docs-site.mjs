@@ -34,7 +34,7 @@ const sections = [
   ["Reference", ["api-reference.md"]],
 ];
 
-const buildExcludes = [];
+const buildExcludes = [/^index\.md$/];
 
 fs.rmSync(outDir, { recursive: true, force: true });
 fs.mkdirSync(outDir, { recursive: true });
@@ -49,6 +49,7 @@ const allPages = allMarkdown(docsDir).map((file) => {
 });
 
 const pages = allPages.filter((page) => !buildExcludes.some((re) => re.test(page.rel)));
+assertUniqueOutputPaths(pages);
 const pageMap = new Map(pages.map((page) => [page.rel, page]));
 const permalinkMap = new Map();
 for (const page of pages) {
@@ -195,6 +196,17 @@ function allMarkdown(dir) {
       return entry.name.endsWith(".md") ? [full] : [];
     })
     .sort();
+}
+
+function assertUniqueOutputPaths(sitePages) {
+  const byOutRel = new Map();
+  for (const page of sitePages) {
+    const existing = byOutRel.get(page.outRel);
+    if (existing !== undefined) {
+      throw new Error(`Duplicate docs output path "${page.outRel}" from ${existing.rel} and ${page.rel}`);
+    }
+    byOutRel.set(page.outRel, page);
+  }
 }
 
 function outPath(rel, frontmatter = {}) {
@@ -361,19 +373,26 @@ function markdownToHtml(markdown, currentRel) {
 
 function inline(text, currentRel) {
   const stash = [];
+  const restoreStash = (value) => value.replace(/@@CODE(\d+)@@/g, (_, i) => stash[Number(i)]);
+  const applyInlineMarkup = (value) => value
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^*])\*([^*\s][^*]*?)\*(?!\*)/g, "$1<em>$2</em>")
+    .replace(/(^|[^_])_([^_\s][^_]*?)_(?!_)/g, "$1<em>$2</em>")
+    .replace(/&lt;(https?:\/\/[^\s<>]+)&gt;/g, '<a href="$1">$1</a>');
+  const finishInlineMarkup = (value) => value
+    .replace(/\\\|/g, "|")
+    .replace(/&lt;br&gt;/g, "<br>");
   let out = text.replace(/`([^`]+)`/g, (_, code) => {
     stash.push(`<code>${escapeHtml(code)}</code>`);
     return `@@CODE${stash.length - 1}@@`;
   });
-  out = escapeHtml(out)
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/(^|[^*])\*([^*\s][^*]*?)\*(?!\*)/g, "$1<em>$2</em>")
-    .replace(/(^|[^_])_([^_\s][^_]*?)_(?!_)/g, "$1<em>$2</em>")
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, href) => `<a href="${escapeAttr(rewriteHref(href, currentRel))}">${label}</a>`)
-    .replace(/&lt;(https?:\/\/[^\s<>]+)&gt;/g, '<a href="$1">$1</a>');
-  out = out.replace(/\\\|/g, "|");
-  out = out.replace(/&lt;br&gt;/g, "<br>");
-  return out.replace(/@@CODE(\d+)@@/g, (_, i) => stash[Number(i)]);
+  out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, href) => {
+    const labelHtml = restoreStash(finishInlineMarkup(applyInlineMarkup(escapeHtml(label))));
+    stash.push(`<a href="${escapeAttr(rewriteHref(href, currentRel))}">${labelHtml}</a>`);
+    return `@@CODE${stash.length - 1}@@`;
+  });
+  out = finishInlineMarkup(applyInlineMarkup(escapeHtml(out)));
+  return restoreStash(out);
 }
 
 function rewriteHref(href, currentRel) {

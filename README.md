@@ -17,7 +17,7 @@ Website: [proxyline.dev](https://proxyline.dev)
 - **Two modes.** `managed` forces traffic through a configured proxy and fails closed on bad config. `ambient` reads `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY` for tooling that needs environment compatibility.
 - **Covers the surfaces that matter.** `http.request`, `http.get`, `https.request`, `https.get`, both global agents, the undici global dispatcher, and helpers for WebSocket agents and HTTP CONNECT sockets.
 - **Replaces caller agents.** In managed mode and active ambient mode, a per-request `http.Agent` passed by a library does not bypass the proxy. TLS options on the caller agent (`ca`, `cert`, `key`, `rejectUnauthorized`, …) are preserved so destination TLS still validates.
-- **Intentional bypasses only.** Managed mode can accept a `bypassPolicy` callback or scoped `registerBypass()` / `withBypass()` calls for trusted loopback or control-plane traffic that must stay direct; every bypass is visible through `explain()`.
+- **Intentional bypasses only.** Managed mode can accept a `bypassPolicy` callback, process-wide `registerBypass()`, or async-scoped `withBypass()` calls for trusted loopback or control-plane traffic that must stay direct; every bypass is visible through `explain()`.
 - **Embeddable runtime controls.** `ifActive` handles process singleton reuse/replacement, `undici` options tune dispatcher defaults, and `isProxylineDispatcher()` identifies Proxyline-owned dispatchers without constructor-name checks.
 - **Scoped proxy CA trust.** `proxyTls.ca` / `proxyTls.caFile` trust a private CA for the proxy endpoint only — no `NODE_EXTRA_CA_CERTS` and no `NODE_TLS_REJECT_UNAUTHORIZED=0`.
 - **Observable.** `proxy.explain(url)` returns a structured decision (`proxied` / `direct` with a `reason`), and an `onEvent` callback receives `runtime.installed`, `runtime.stopped`, and per-decision events. Proxy URLs are credential-redacted.
@@ -99,18 +99,16 @@ const agent = createAmbientNodeProxyAgent({
 The helper returns `undefined` when ambient proxy env is not configured, so callers can pass an agent only when needed.
 It uses Proxyline's built-in HTTP/HTTPS Node agent, and `proxyTls` applies only to HTTPS proxy endpoints. SOCKS and PAC proxy schemes remain unsupported.
 
-## Feature matrix
+## Product coverage
 
-| Surface | Covered | Notes |
-| --- | --- | --- |
-| `http.request` / `http.get` | yes | global method patch + global agent swap |
-| `https.request` / `https.get` | yes | global method patch + global agent swap |
-| `fetch` / undici global dispatcher | yes | `globalThis.fetch` patch + `setGlobalDispatcher` |
-| WebSocket clients accepting a Node `agent` | yes | `proxy.createWebSocketAgent()` |
-| Caller-built `http.Agent` / `https.Agent` | overridden in managed and active ambient mode | TLS options preserved |
-| Explicit HTTP CONNECT socket | yes | `openProxyConnectTunnel()` |
-| Raw `net.connect` / `tls.connect` | no | out of scope, see [Security](./docs/security.md) |
-| Native or private transport stacks | no | out of scope, see [Security](./docs/security.md) |
+- `http.request` / `http.get`: covered by global method patching and global agent replacement.
+- `https.request` / `https.get`: covered by global method patching and global agent replacement.
+- `fetch` / undici global dispatcher: covered by the `globalThis.fetch` patch and `setGlobalDispatcher`.
+- WebSocket clients accepting a Node `agent`: covered with `proxy.createWebSocketAgent()`.
+- Caller-built `http.Agent` / `https.Agent`: overridden in managed and active ambient mode, with TLS options preserved.
+- Explicit HTTP CONNECT sockets: covered with `openProxyConnectTunnel()`.
+- Raw `net.connect` / `tls.connect`: out of scope; see [Security](./docs/security.md).
+- Native or private transport stacks: out of scope; see [Security](./docs/security.md).
 
 ## Why not just env vars?
 

@@ -236,9 +236,9 @@ type ProxylineHandle = Readonly<{
 - `createUndiciDispatcher()` — proxy-aware undici `Dispatcher`. Returns a direct `UndiciAgent()` when ambient-inactive or after `stop()`.
 - `createWebSocketAgent()` — same as `createNodeAgent()` but typed for WebSocket clients.
 - `explain(url, options?)` — returns a `ProxylineDecision` and emits a `decision` event.
-- `registerBypass({ url, surface? })` — managed-mode scoped bypass. Returns an unregister callback. When `surface` is omitted, the bypass matches any surface for that exact URL.
+- `registerBypass({ url, surface? })` — managed-mode process-wide bypass. Returns an unregister callback. When `surface` is omitted, the bypass matches any surface for that exact URL.
 - `stop()` — restores the captured Node HTTP(S) stack, undici dispatcher, and fetch globals, destroys Proxyline-owned runtime agents/dispatchers, emits `runtime.stopped`. Idempotent.
-- `withBypass(registration, run)` — registers a bypass while `run()` executes. If `run()` returns a promise, unregisters after that promise settles.
+- `withBypass(registration, run)` — applies a bypass only to `run()` and async work created inside that callback.
 
 ### Dispatcher Detection
 

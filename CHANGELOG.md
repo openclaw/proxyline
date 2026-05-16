@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Fixed `withBypass()` to scope temporary bypasses to the calling async context instead of process-wide state.
+- Fixed HTTPS SNI preservation when Node request options override a URL hostname.
+- Hardened package and docs release output by preserving declaration-map sources, shipping product docs, rejecting duplicate docs pages, and avoiding lockfile-bypassing prepack installs.
+
 ## 0.3.0 - 2026-05-15
 
 - Added branded Proxyline dispatcher detection, reusable active-runtime installs, scoped dynamic bypass registration, first-class undici dispatcher tuning options, and a side-effect-light dispatcher detection subpath.
