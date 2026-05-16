@@ -42,7 +42,9 @@ test("packed package includes sources and product docs referenced by metadata", 
   const tarball = fs.readdirSync(packDir).find((entry) => entry.endsWith(".tgz"));
   assert.ok(tarball);
   const tarballPath = path.join(packDir, tarball);
-  const entries = run("tar", ["-tzf", tarballPath], packDir).split("\n");
+  const entries = run("tar", ["-tzf", tarballPath], packDir)
+    .split("\n")
+    .map((entry) => entry.replaceAll("\\", "/"));
 
   assert.ok(entries.includes("package/src/index.ts"));
   assert.ok(entries.includes("package/docs/README.md"));
