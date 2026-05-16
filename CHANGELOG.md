@@ -1,5 +1,7 @@
 # Changelog
 
+## Unreleased
+
 ## 0.3.1 - 2026-05-16
 
 - Fixed `withBypass()` to scope temporary bypasses to the calling async context instead of process-wide state.
