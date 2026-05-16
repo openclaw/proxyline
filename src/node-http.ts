@@ -104,18 +104,22 @@ function preserveCallerAgentOptions(options: NodeHttpRequestOptions): void {
   }
 }
 
+function unbracketHostname(hostname: string): string {
+  return hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
+}
+
 function inferDestinationHostname(
   url: string | URL | undefined,
   options: NodeHttpRequestOptions,
 ): string | undefined {
-  if (url !== undefined) {
-    return url instanceof URL ? url.hostname : new URL(url).hostname;
-  }
   if (typeof options.hostname === "string") {
-    return options.hostname;
+    return unbracketHostname(options.hostname);
+  }
+  if (url !== undefined) {
+    return unbracketHostname(url instanceof URL ? url.hostname : new URL(url).hostname);
   }
   if (typeof options.host === "string") {
-    return options.host.replace(/:\d*$/, "");
+    return unbracketHostname(splitHostPort(options.host).host);
   }
   return undefined;
 }

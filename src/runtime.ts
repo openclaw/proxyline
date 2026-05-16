@@ -1,5 +1,6 @@
 import http from "node:http";
 import https from "node:https";
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
   Agent as UndiciAgent,
   Dispatcher,
@@ -289,6 +290,7 @@ function shouldBypassManagedProxy(
 type DynamicBypassRegistry = {
   add: (registration: ProxylineBypassRegistration) => () => void;
   has: (url: string | URL, surface: ProxylineSurface) => boolean;
+  runScoped: <T>(registration: ProxylineBypassRegistration, run: () => T) => T;
 };
 
 function bypassKey(url: string | URL, surface: ProxylineSurface | undefined): string {
@@ -297,6 +299,12 @@ function bypassKey(url: string | URL, surface: ProxylineSurface | undefined): st
 
 function createDynamicBypassRegistry(): DynamicBypassRegistry {
   const counts = new Map<string, number>();
+  const scopedBypasses = new AsyncLocalStorage<ReadonlySet<string>>();
+  const hasScopedBypass = (url: string | URL, surface: ProxylineSurface): boolean => {
+    const scoped = scopedBypasses.getStore();
+    return scoped !== undefined &&
+      (scoped.has(bypassKey(url, surface)) || scoped.has(bypassKey(url, undefined)));
+  };
   return {
     add: (registration) => {
       const key = bypassKey(registration.url, registration.surface);
@@ -316,8 +324,15 @@ function createDynamicBypassRegistry(): DynamicBypassRegistry {
       };
     },
     has: (url, surface) =>
+      hasScopedBypass(url, surface) ||
       (counts.get(bypassKey(url, surface)) ?? 0) > 0 ||
       (counts.get(bypassKey(url, undefined)) ?? 0) > 0,
+    runScoped: (registration, run) => {
+      const inherited = scopedBypasses.getStore();
+      const scoped = new Set(inherited);
+      scoped.add(bypassKey(registration.url, registration.surface));
+      return scopedBypasses.run(scoped, run);
+    },
   };
 }
 
@@ -877,19 +892,10 @@ export function installProxyline(options: ProxylineOptions): ProxylineHandle {
       emit(options.onEvent, { type: "runtime.stopped", mode: options.mode });
     },
     withBypass: (registration, run) => {
-      const unregister = handle.registerBypass(registration);
-      try {
-        const result = run();
-        if (isPromiseLike(result)) {
-          void Promise.resolve(result).then(unregister, unregister);
-          return result;
-        }
-        unregister();
-        return result;
-      } catch (error) {
-        unregister();
-        throw error;
+      if (stopped || proxyUrl === undefined) {
+        return run();
       }
+      return dynamicBypasses.runScoped(registration, run);
     },
   };
 
@@ -898,9 +904,3 @@ export function installProxyline(options: ProxylineOptions): ProxylineHandle {
 }
 
 export const installGlobalProxy = installProxyline;
-
-function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
-  return typeof value === "object" &&
-    value !== null &&
-    typeof (value as { then?: unknown }).then === "function";
-}

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import http from "node:http";
 import test from "node:test";
 import type { Dispatcher } from "undici";
 import {
@@ -14,7 +15,7 @@ import {
   type ProxylineEvent,
 } from "../src/index.js";
 import { formatConnectAuthority } from "../src/connect.js";
-import { CALLER_AGENT_TLS_OPTION_KEYS } from "../src/node-http.js";
+import { bindNodeHttpMethod, CALLER_AGENT_TLS_OPTION_KEYS } from "../src/node-http.js";
 
 function withProxyEnv<T>(env: Record<string, string | undefined>, run: () => T): T {
   const keys = [
@@ -190,6 +191,35 @@ test("managed mode keeps dynamic bypass active for async callbacks", async () =>
   }
 });
 
+test("managed mode withBypass does not leak to concurrent callers", async () => {
+  const proxy = installGlobalProxy({
+    mode: "managed",
+    proxyUrl: "https://proxy.example:8443",
+  });
+  let release: () => void = () => {};
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  try {
+    const resultPromise = proxy.withBypass(
+      { url: "ws://gateway.localhost:18789/" },
+      async () => {
+        await pending;
+        return proxy.explain("ws://gateway.localhost:18789/", { surface: "websocket" });
+      },
+    );
+
+    assert.equal(proxy.explain("ws://gateway.localhost:18789/", { surface: "websocket" }).kind, "proxied");
+    release();
+    const result = await resultPromise;
+    assert.equal(result.kind, "direct");
+    assert.equal(result.reason, "managed-proxy-bypass-policy");
+  } finally {
+    proxy.stop();
+  }
+});
+
 test("managed mode withBypass preserves promise-like callback results", async () => {
   const proxy = installGlobalProxy({
     mode: "managed",
@@ -197,11 +227,14 @@ test("managed mode withBypass preserves promise-like callback results", async ()
   });
 
   try {
-    const callbackPromise = Promise.resolve()
-      .then(() => proxy.explain("ws://gateway.localhost:18789/", { surface: "websocket" }));
+    let callbackPromise: Promise<ReturnType<typeof proxy.explain>> | undefined;
     const result = proxy.withBypass(
       { url: "ws://gateway.localhost:18789/" },
-      () => callbackPromise,
+      () => {
+        callbackPromise = Promise.resolve()
+          .then(() => proxy.explain("ws://gateway.localhost:18789/", { surface: "websocket" }));
+        return callbackPromise;
+      },
     );
 
     assert.equal(result, callbackPromise);
@@ -209,6 +242,66 @@ test("managed mode withBypass preserves promise-like callback results", async ()
   } finally {
     proxy.stop();
   }
+});
+
+test("node HTTPS method patch uses option host overrides for destination SNI", () => {
+  let captured: Record<string, unknown> | undefined;
+  const request = {
+    once() {
+      return request;
+    },
+  } as unknown as http.ClientRequest;
+  const method = bindNodeHttpMethod(
+    (() => request) as typeof http.request,
+    (options) => {
+      captured = { ...options };
+      return new http.Agent();
+    },
+  );
+
+  method(new URL("https://url-host.example/"), { hostname: "option-host.example" });
+
+  assert.equal(captured?.servername, "option-host.example");
+});
+
+test("node HTTPS method patch keeps URL host SNI when URL options use host", () => {
+  let captured: Record<string, unknown> | undefined;
+  const request = {
+    once() {
+      return request;
+    },
+  } as unknown as http.ClientRequest;
+  const method = bindNodeHttpMethod(
+    (() => request) as typeof http.request,
+    (options) => {
+      captured = { ...options };
+      return new http.Agent();
+    },
+  );
+
+  method(new URL("https://url-host.example/"), { host: "[::1]:443" });
+
+  assert.equal(captured?.servername, "url-host.example");
+});
+
+test("node HTTPS method patch avoids destination SNI for bracketed IP host requests", () => {
+  let captured: Record<string, unknown> | undefined;
+  const request = {
+    once() {
+      return request;
+    },
+  } as unknown as http.ClientRequest;
+  const method = bindNodeHttpMethod(
+    (() => request) as typeof http.request,
+    (options) => {
+      captured = { ...options };
+      return new http.Agent();
+    },
+  );
+
+  method({ protocol: "https:", host: "[::1]:443" });
+
+  assert.equal(captured?.servername, undefined);
 });
 
 test("managed mode reuses compatible active runtime and replaces on request", () => {
