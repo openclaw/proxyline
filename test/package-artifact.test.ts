@@ -44,7 +44,7 @@ test("packed package includes sources and product docs referenced by metadata", 
   const tarballPath = path.join(packDir, tarball);
   const entries = run("tar", ["-tzf", tarballPath], packDir)
     .split("\n")
-    .map((entry) => entry.replaceAll("\\", "/"));
+    .map((entry) => entry.replaceAll("\\", "/").trim());
 
   assert.ok(entries.includes("package/src/index.ts"));
   assert.ok(entries.includes("package/docs/README.md"));
