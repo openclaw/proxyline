@@ -1,10 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.3.1 - 2026-05-16
 
 - Fixed `withBypass()` to scope temporary bypasses to the calling async context instead of process-wide state.
 - Fixed HTTPS SNI preservation when Node request options override a URL hostname.
-- Hardened package and docs release output by preserving declaration-map sources, shipping product docs, rejecting duplicate docs pages, and avoiding lockfile-bypassing prepack installs.
+- Hardened package and docs release output by preserving declaration-map sources, shipping product docs, rejecting duplicate docs pages, avoiding lockfile-bypassing prepack installs, and keeping package artifact checks portable on Windows.
 
 ## 0.3.0 - 2026-05-15
 

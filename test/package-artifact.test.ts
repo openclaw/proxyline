@@ -14,14 +14,31 @@ function run(command: string, args: string[], cwd = repoRoot): string {
   return result.stdout;
 }
 
-function npmCommand(): string {
-  return process.platform === "win32" ? "npm.cmd" : "npm";
+function packageManagerCommand(): { command: string; prefixArgs: string[]; supportsCache: boolean } {
+  if (process.env.npm_execpath !== undefined) {
+    const execPath = process.env.npm_execpath;
+    const extension = path.extname(execPath).toLowerCase();
+    const runsWithNode = extension === ".js" || extension === ".cjs" || extension === ".mjs";
+    return {
+      command: runsWithNode ? process.execPath : execPath,
+      prefixArgs: runsWithNode ? [execPath] : [],
+      supportsCache: path.basename(execPath).startsWith("npm"),
+    };
+  }
+  return { command: process.platform === "win32" ? "pnpm.cmd" : "pnpm", prefixArgs: [], supportsCache: false };
 }
 
 test("packed package includes sources and product docs referenced by metadata", () => {
   const packDir = fs.mkdtempSync(path.join(os.tmpdir(), "proxyline-pack-"));
   const cacheDir = path.join(packDir, "npm-cache");
-  run(npmCommand(), ["pack", "--pack-destination", packDir, "--cache", cacheDir]);
+  const packageManager = packageManagerCommand();
+  run(packageManager.command, [
+    ...packageManager.prefixArgs,
+    "pack",
+    "--pack-destination",
+    packDir,
+    ...(packageManager.supportsCache ? ["--cache", cacheDir] : []),
+  ]);
   const tarball = fs.readdirSync(packDir).find((entry) => entry.endsWith(".tgz"));
   assert.ok(tarball);
   const tarballPath = path.join(packDir, tarball);
