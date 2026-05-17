@@ -1604,6 +1604,26 @@ test("managed mode trusts an HTTPS proxy endpoint with scoped CA", async () => {
   }
 });
 
+test("managed mode does not send IP-literal SNI to HTTPS proxy endpoints", async () => {
+  const lab = await startProxyLab({ secureProxy: true, proxyHost: "127.0.0.1" });
+  const proxyCa = lab.proxyCa;
+  assert.ok(proxyCa);
+  const proxy = installGlobalProxy({
+    mode: "managed",
+    proxyUrl: lab.proxyUrl,
+    proxyTls: { ca: proxyCa },
+  });
+  try {
+    const denied = await fetch(`${lab.targetUrl}/denied`);
+
+    assert.equal(denied.status, 403);
+    assert.equal(lab.events.some((event) => event.type === "proxy_sni"), false);
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
 test("managed mode keeps destination TLS options from weakening HTTPS proxy TLS", async () => {
   const lab = await startProxyLab({ secureProxy: true, secureTarget: true });
   const proxy = installGlobalProxy({ mode: "managed", proxyUrl: lab.proxyUrl });
@@ -1614,7 +1634,10 @@ test("managed mode keeps destination TLS options from weakening HTTPS proxy TLS"
       /self-signed certificate/,
     );
 
-    assert.equal(lab.events.length, 0);
+    assert.deepEqual(
+      lab.events.filter((event) => event.type !== "proxy_sni"),
+      [],
+    );
   } finally {
     callerAgent.destroy();
     proxy.stop();

@@ -1,11 +1,13 @@
 import http from "node:http";
 import https from "node:https";
 import { AsyncLocalStorage } from "node:async_hooks";
+import net from "node:net";
 import {
   Agent as UndiciAgent,
   Dispatcher,
   FormData as UndiciFormData,
   Headers as UndiciHeaders,
+  Pool as UndiciPool,
   Request as UndiciRequest,
   Response as UndiciResponse,
   errors as undiciErrors,
@@ -389,6 +391,11 @@ type UndiciDispatcherOptions = Readonly<{
   proxyCa: string | undefined;
   undici: ProxylineUndiciOptions | undefined;
 }>;
+type UndiciProxyAgentOptions = Exclude<ConstructorParameters<typeof UndiciProxyAgent>[0], string | URL>;
+type UndiciProxyClientFactory = NonNullable<
+  UndiciProxyAgentOptions["clientFactory"]
+>;
+type UnknownFunction = (...args: unknown[]) => unknown;
 
 function finiteNonNegativeInteger(value: number | undefined): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0
@@ -434,6 +441,42 @@ function createUndiciAgent(options: ProxylineUndiciOptions | undefined): UndiciA
   return new UndiciAgent(resolveUndiciBaseOptions(options));
 }
 
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stripIpServernameFromConnectOptions(options: unknown): unknown {
+  if (!isObjectRecord(options) || typeof options.servername !== "string") {
+    return options;
+  }
+  if (net.isIP(options.servername) === 0) {
+    return options;
+  }
+  const next = { ...options };
+  delete next.servername;
+  return next;
+}
+
+function stripIpServernameFromConnect(connect: unknown): unknown {
+  if (typeof connect !== "function") {
+    return connect;
+  }
+  return (options: unknown, callback: unknown): unknown =>
+    (connect as UnknownFunction)(stripIpServernameFromConnectOptions(options), callback);
+}
+
+function createProxyClientFactory(): UndiciProxyClientFactory {
+  return (origin: URL, options: object): Dispatcher => {
+    const clientOptions = isObjectRecord(options)
+      ? { ...options, connect: stripIpServernameFromConnect(options.connect) }
+      : options;
+    return new UndiciPool(
+      origin,
+      clientOptions as ConstructorParameters<typeof UndiciPool>[1],
+    );
+  };
+}
+
 function createUndiciProxyAgent(
   proxyUrl: string,
   options: UndiciDispatcherOptions,
@@ -441,6 +484,7 @@ function createUndiciProxyAgent(
   return new UndiciProxyAgent({
     ...resolveUndiciBaseOptions(options.undici),
     uri: proxyUrl,
+    clientFactory: createProxyClientFactory(),
     ...(options.proxyCa !== undefined ? { proxyTls: { ca: options.proxyCa } } : {}),
   } as ConstructorParameters<typeof UndiciProxyAgent>[0]);
 }

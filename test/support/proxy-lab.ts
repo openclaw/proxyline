@@ -1,6 +1,7 @@
 import http from "node:http";
 import https from "node:https";
 import net from "node:net";
+import tls from "node:tls";
 import { once } from "node:events";
 import { AddressInfo } from "node:net";
 import { createProxyTestCertificate } from "./proxy-cert.js";
@@ -53,6 +54,10 @@ export type ProxyLabEvent =
       message: string;
       url?: string;
       authority?: string;
+    }
+  | {
+      type: "proxy_sni";
+      servername: string;
     };
 
 export type ProxyLab = {
@@ -368,6 +373,16 @@ export async function startProxyLab(options: ProxyLabOptions = {}): Promise<Prox
         {
           cert: proxyCertificate?.certificate,
           key: proxyCertificate?.privateKey,
+          SNICallback: (servername, callback) => {
+            events.push({ type: "proxy_sni", servername });
+            callback(
+              null,
+              tls.createSecureContext({
+                cert: proxyCertificate?.certificate,
+                key: proxyCertificate?.privateKey,
+              }),
+            );
+          },
         },
         onProxyRequest,
       )
