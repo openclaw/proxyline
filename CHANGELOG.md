@@ -2,6 +2,8 @@
 
 ## 0.3.2 - Unreleased
 
+- Fixed managed Undici proxy dispatchers so HTTPS proxy endpoints addressed by IP do not send invalid IP-literal SNI.
+
 ## 0.3.1 - 2026-05-16
 
 - Fixed `withBypass()` to scope temporary bypasses to the calling async context instead of process-wide state.
