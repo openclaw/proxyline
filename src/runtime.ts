@@ -449,7 +449,8 @@ function stripIpServernameFromConnectOptions(options: unknown): unknown {
   if (!isObjectRecord(options) || typeof options.servername !== "string") {
     return options;
   }
-  if (net.isIP(options.servername) === 0) {
+  const servername = options.servername.replace(/^\[|\]$/g, "");
+  if (net.isIP(servername) === 0) {
     return options;
   }
   const next = { ...options };

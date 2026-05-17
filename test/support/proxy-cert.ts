@@ -19,7 +19,7 @@ export type ProxyTestCertificateOptions = {
 
 function buildSubjectAltNames(options: ProxyTestCertificateOptions): string {
   const dnsNames = options.dnsNames ?? ["localhost"];
-  const ipAddresses = options.ipAddresses ?? ["127.0.0.1"];
+  const ipAddresses = options.ipAddresses ?? ["127.0.0.1", "::1"];
   const entries: string[] = [];
   for (const [index, ipAddress] of ipAddresses.entries()) {
     entries.push(`IP.${index + 1} = ${ipAddress}`);

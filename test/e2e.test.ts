@@ -1624,6 +1624,47 @@ test("managed mode does not send IP-literal SNI to HTTPS proxy endpoints", async
   }
 });
 
+test("managed mode does not send IPv6-literal SNI to HTTPS proxy endpoints", async (t) => {
+  const probe = http.createServer((_req, res) => {
+    res.end("ipv6 available\n");
+  });
+  try {
+    probe.listen(0, "::1");
+    await once(probe, "listening");
+  } catch (error) {
+    probe.close();
+    t.skip(`IPv6 loopback unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
+  await new Promise<void>((resolve, reject) => {
+    probe.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+
+  const lab = await startProxyLab({ secureProxy: true, proxyHost: "::1" });
+  const proxyCa = lab.proxyCa;
+  assert.ok(proxyCa);
+  const proxy = installGlobalProxy({
+    mode: "managed",
+    proxyUrl: lab.proxyUrl,
+    proxyTls: { ca: proxyCa },
+  });
+  try {
+    const denied = await fetch(`${lab.targetUrl}/denied`);
+
+    assert.equal(denied.status, 403);
+    assert.equal(lab.events.some((event) => event.type === "proxy_sni"), false);
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
 test("managed mode keeps destination TLS options from weakening HTTPS proxy TLS", async () => {
   const lab = await startProxyLab({ secureProxy: true, secureTarget: true });
   const proxy = installGlobalProxy({ mode: "managed", proxyUrl: lab.proxyUrl });

@@ -7,7 +7,7 @@ import { AddressInfo } from "node:net";
 import { createProxyTestCertificate } from "./proxy-cert.js";
 
 export type ProxyLabOptions = {
-  proxyHost?: "127.0.0.1" | "localhost";
+  proxyHost?: "127.0.0.1" | "::1" | "localhost";
   requiredProxyAuthorization?: string;
   secureProxy?: boolean;
   secureTarget?: boolean;
@@ -78,6 +78,10 @@ type LabServer = http.Server | https.Server;
 function listen(server: LabServer, host = "127.0.0.1"): Promise<AddressInfo> {
   server.listen(0, host);
   return once(server, "listening").then(() => server.address() as AddressInfo);
+}
+
+function formatUrlHost(host: string): string {
+  return net.isIP(host) === 6 ? `[${host}]` : host;
 }
 
 function closeServer(server: LabServer): Promise<void> {
@@ -393,7 +397,7 @@ export async function startProxyLab(options: ProxyLabOptions = {}): Promise<Prox
   const proxyAddress = await listen(proxy, proxyHost);
 
   return {
-    proxyUrl: `${options.secureProxy ? "https" : "http"}://${proxyHost}:${proxyAddress.port}`,
+    proxyUrl: `${options.secureProxy ? "https" : "http"}://${formatUrlHost(proxyHost)}:${proxyAddress.port}`,
     ...(proxyCertificate !== undefined ? { proxyCa: proxyCertificate.certificate } : {}),
     targetUrl: `${options.secureTarget ? "https" : "http"}://${targetHost}:${targetAddress.port}`,
     ...(targetCertificate !== undefined ? { targetCa: targetCertificate.certificate } : {}),
