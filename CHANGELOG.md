@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.4 - Unreleased
+
 ## 0.3.3 - 2026-05-18
 
 - Fixed managed `globalThis.fetch` so later Undici global dispatcher replacement cannot bypass the active Proxyline dispatcher. Thanks @jesse-merhi.
