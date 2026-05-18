@@ -103,7 +103,8 @@ It uses Proxyline's built-in HTTP/HTTPS Node agent, and `proxyTls` applies only 
 
 - `http.request` / `http.get`: covered by global method patching and global agent replacement.
 - `https.request` / `https.get`: covered by global method patching and global agent replacement.
-- `fetch` / undici global dispatcher: covered by the `globalThis.fetch` patch and `setGlobalDispatcher`.
+- `globalThis.fetch`: covered by the fetch patch, including explicit dispatcher options and later Undici global dispatcher replacement in managed mode.
+- Undici global dispatcher: installed for Undici APIs that read the current process dispatcher.
 - WebSocket clients accepting a Node `agent`: covered with `proxy.createWebSocketAgent()`.
 - Caller-built `http.Agent` / `https.Agent`: overridden in managed and active ambient mode, with TLS options preserved.
 - Explicit HTTP CONNECT sockets: covered with `openProxyConnectTunnel()`.

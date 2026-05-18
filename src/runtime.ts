@@ -216,28 +216,40 @@ async function normalizeFetchInput(
   });
 }
 
-function stripFetchDispatcher(
+function withManagedFetchDispatcher(
   init: Parameters<typeof globalThis.fetch>[1],
+  dispatcher: Dispatcher,
 ): Parameters<typeof globalThis.fetch>[1] {
-  if (typeof init !== "object" || init === null) {
-    return init;
+  if (
+    init !== undefined &&
+    init !== null &&
+    typeof init !== "object" &&
+    typeof init !== "function"
+  ) {
+    throw new TypeError(
+      `Request constructor: Expected ${String(init)} to be one of: Null, Undefined, Object.`,
+    );
   }
-  const sanitized = Object.create(init);
+  const sanitized = init === undefined || init === null ? {} : Object.create(init);
   Reflect.defineProperty(sanitized, "dispatcher", {
     configurable: true,
     enumerable: true,
-    value: undefined,
+    value: dispatcher,
     writable: true,
   });
   return sanitized;
 }
 
 const proxylineFetch: typeof globalThis.fetch = async (input, init) => {
-  const managedMode = activeRuntime?.mode === "managed";
+  const managedDispatcher = activeRuntime?.mode === "managed"
+    ? activeRuntime.installedDispatcher
+    : undefined;
   const normalizedInput = await normalizeFetchInput(input, init, {
-    preserveDispatcher: !managedMode,
+    preserveDispatcher: managedDispatcher === undefined,
   });
-  const normalizedInit = managedMode ? stripFetchDispatcher(init) : init;
+  const normalizedInit = managedDispatcher === undefined
+    ? init
+    : withManagedFetchDispatcher(init, managedDispatcher);
   const response: unknown = await Reflect.apply(
     undiciFetch,
     undefined,

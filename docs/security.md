@@ -30,7 +30,7 @@ Anything that does not flow through the patched APIs:
 
 - Direct `net.connect` or `tls.connect` calls. Code that opens raw sockets is not seen by Proxyline.
 - Native modules with private transport stacks (e.g. some database drivers, gRPC C bindings).
-- Libraries that import and call `undici.fetch` directly with their own explicit `Dispatcher`. Proxyline's managed `globalThis.fetch` strips explicit dispatchers, but it cannot rewrite every imported undici function reference.
+- Libraries that import and call `undici.fetch` directly with their own explicit `Dispatcher`. Proxyline's managed `globalThis.fetch` pins its own dispatcher even when callers pass an explicit dispatcher or later replace the Undici global dispatcher, but it cannot rewrite every imported undici function reference.
 - DNS resolution itself. Proxyline tells the proxy a hostname; DNS-based exfiltration via the local resolver is out of scope.
 - Sockets opened **before** `installProxyline` ran. Existing keepalive connections continue to use whatever transport they were created with.
 - Module references captured before `installProxyline` ran. Anything that stored `http.request` in a local variable at import time keeps the un-patched reference.
@@ -69,7 +69,7 @@ This is deliberate: two competing proxy patches would race on `http.request` and
 | Threat | Mitigated | Notes |
 | --- | --- | --- |
 | Library passes a direct `http.Agent` per request | yes (managed) | Replaced before the request runs |
-| Library passes a direct `Dispatcher` to managed `globalThis.fetch` | yes | Explicit dispatchers are stripped |
+| Library passes a direct `Dispatcher` to managed `globalThis.fetch` | yes | Proxyline pins its dispatcher |
 | Trusted local endpoint needs direct routing | yes, with `bypassPolicy` | Keep the callback narrow and auditable |
 | Library calls imported `undici.fetch` with a direct `Dispatcher` | no | Imported function references are outside the global fetch patch |
 | Library uses `net.connect` directly | no | Out of scope |

@@ -7,7 +7,7 @@ import { Duplex } from "node:stream";
 import tls from "node:tls";
 import { URL } from "node:url";
 import test from "node:test";
-import { Dispatcher, fetch } from "undici";
+import { Agent as UndiciAgent, Dispatcher, fetch, setGlobalDispatcher } from "undici";
 import WebSocket from "ws";
 import { createWebSocketServer } from "./support/ws-server.js";
 import {
@@ -1547,6 +1547,31 @@ test("managed mode routes undici fetch through the lab proxy", async () => {
       ),
     );
   } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
+test("managed global fetch keeps proxy routing after global dispatcher replacement", async () => {
+  const lab = await startProxyLab();
+  const proxy = installGlobalProxy({ mode: "managed", proxyUrl: lab.proxyUrl });
+  const directDispatcher = new UndiciAgent();
+  try {
+    setGlobalDispatcher(directDispatcher);
+
+    const response = await globalThis.fetch(`${lab.targetUrl}/denied`);
+
+    assert.equal(response.status, 403);
+    assert.match(await response.text(), /blocked by proxy lab/);
+    assert.ok(
+      lab.events.some(
+        (event) =>
+          (event.type === "deny" && event.url.endsWith("/denied")) ||
+          (event.type === "deny_connect" && event.path === "/denied"),
+      ),
+    );
+  } finally {
+    await directDispatcher.close();
     proxy.stop();
     await lab.close();
   }
