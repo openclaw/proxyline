@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.3 - Unreleased
+## 0.3.3 - 2026-05-18
 
 - Fixed managed `globalThis.fetch` so later Undici global dispatcher replacement cannot bypass the active Proxyline dispatcher. Thanks @jesse-merhi.
 - Updated package tooling and test dependencies to exact latest versions, including pnpm 11.1.2, TypeScript 6.0.3, and Undici 8.3.0; raised the Node.js floor to 22.19.0 to match Undici 8.
