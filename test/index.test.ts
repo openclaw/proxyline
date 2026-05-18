@@ -59,15 +59,11 @@ const dispatchOptions = {
 
 function closedDispatchHandler(onError?: (error: Error) => void): Dispatcher.DispatchHandler {
   return {
-    onConnect() {},
-    onData() {
-      return true;
-    },
-    onComplete() {},
-    ...(onError !== undefined ? { onError } : {}),
-    onHeaders() {
-      return true;
-    },
+    onRequestStart() {},
+    onResponseData() {},
+    onResponseEnd() {},
+    ...(onError !== undefined ? { onResponseError: (_controller, error) => onError(error) } : {}),
+    onResponseStart() {},
   };
 }
 

@@ -31,7 +31,7 @@ pnpm add @openclaw/proxyline
 npm install @openclaw/proxyline
 ```
 
-Requires Node 20.18.1+ and a host `undici` dependency compatible with `>=7.25.0 <9`.
+Requires Node 22.19.0+ and a host `undici` dependency compatible with `>=8.3.0 <9`.
 
 ## Quick start
 

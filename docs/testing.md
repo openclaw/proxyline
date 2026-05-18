@@ -15,7 +15,7 @@ pnpm typecheck   # type-only
 
 `pnpm test` builds `dist/`, then runs `node --test` via `tsx` against `test/index.test.ts` (unit), `test/e2e.test.ts` (integration), and `test/package.test.ts` (package entrypoint).
 `pnpm check` enforces native Node coverage for `src/**/*.ts` with thresholds of 85% lines, 80% branches, and 80% functions on Node versions that expose native threshold flags.
-CI runs that check on Ubuntu, macOS, and Windows across Node 20.18.1, 22, 24, and 26; Node 20.18.1 keeps the declared minimum covered with native coverage enabled and skips only the unavailable threshold/include flags.
+CI runs that check on Ubuntu, macOS, and Windows across Node 22.19.0, 24, and 26; Node 22.19.0 keeps the declared minimum covered with native coverage enabled.
 
 ## What the lab covers
 

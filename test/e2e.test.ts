@@ -1110,19 +1110,16 @@ test("ambient mode resolves low-level undici absolute-form paths from origin", a
           path: "http://no-proxy.example/denied",
         },
         {
-          onData(chunk: Buffer): boolean {
+          onResponseData(_controller, chunk): void {
             body += chunk.toString("utf8");
-            return true;
           },
-          onComplete() {
+          onResponseEnd() {
             resolve({ body, statusCode: responseStatusCode });
           },
-          onConnect() {},
-          onError: reject,
-          onHeaders(statusCode: number, _headers: Buffer[], resume: () => void): boolean {
+          onRequestStart() {},
+          onResponseError: (_controller, error) => reject(error),
+          onResponseStart(_controller, statusCode) {
             responseStatusCode = statusCode;
-            resume();
-            return true;
           },
         } satisfies Dispatcher.DispatchHandler,
       );

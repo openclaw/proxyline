@@ -1,6 +1,6 @@
 # Getting Started
 
-Proxyline targets Node.js 20.18.1+. It is published as `@openclaw/proxyline` and ships ESM with TypeScript types.
+Proxyline targets Node.js 22.19.0+. It is published as `@openclaw/proxyline` and ships ESM with TypeScript types.
 
 ## Install
 

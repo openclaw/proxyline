@@ -74,6 +74,11 @@ type ProxylineDispatcher = Dispatcher & {
   [PROXYLINE_DISPATCHER_BRAND]?: true;
 };
 
+type CompatibleDispatchHandler = Dispatcher.DispatchHandler & {
+  onError?: (error: Error) => void;
+  onResponseError?: (controller: Dispatcher.DispatchController | null, error: Error) => void;
+};
+
 // Node's global fetch types come from bundled undici-types, while the runtime
 // implementation intentionally delegates to this package's undici dependency.
 const proxylineHeaders = UndiciHeaders as unknown as typeof globalThis.Headers;
@@ -517,6 +522,22 @@ function createUndiciProxyDispatcher(
   return new ManagedUndiciDispatcher(options.resolver, dispatcherOptions);
 }
 
+function reportClosedDispatchError(
+  handler: Dispatcher.DispatchHandler,
+  error: Error,
+): boolean {
+  const compatibleHandler = handler as CompatibleDispatchHandler;
+  if (compatibleHandler.onResponseError !== undefined) {
+    compatibleHandler.onResponseError(null, error);
+    return false;
+  }
+  if (compatibleHandler.onError !== undefined) {
+    compatibleHandler.onError(error);
+    return false;
+  }
+  throw error;
+}
+
 class ManagedUndiciDispatcher extends Dispatcher {
   public readonly [PROXYLINE_DISPATCHER_BRAND] = true;
   readonly #directDispatcher: UndiciAgent;
@@ -537,11 +558,7 @@ class ManagedUndiciDispatcher extends Dispatcher {
     handler: Dispatcher.DispatchHandler,
   ): boolean {
     if (this.#closedError !== undefined) {
-      if (handler.onError === undefined) {
-        throw this.#closedError;
-      }
-      handler.onError(this.#closedError);
-      return false;
+      return reportClosedDispatchError(handler, this.#closedError);
     }
     const url = resolveUndiciDispatchUrl(options);
     const proxyUrl = url === undefined ? "" : this.#resolver.getProxyForUrl(url, "undici");
@@ -627,11 +644,7 @@ class AmbientUndiciDispatcher extends Dispatcher {
     handler: Dispatcher.DispatchHandler,
   ): boolean {
     if (this.#closedError !== undefined) {
-      if (handler.onError === undefined) {
-        throw this.#closedError;
-      }
-      handler.onError(this.#closedError);
-      return false;
+      return reportClosedDispatchError(handler, this.#closedError);
     }
     const url = resolveUndiciDispatchUrl(options);
     const proxyUrl = url === undefined ? undefined : resolveAmbientProxyForUrl(url, this.#env);
