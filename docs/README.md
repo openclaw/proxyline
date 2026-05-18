@@ -25,7 +25,8 @@ Process-global proxy routing for Node.js. Proxyline patches the network surfaces
 
 - `http.request` / `http.get`: covered by global method patching and global agent replacement.
 - `https.request` / `https.get`: covered by global method patching and global agent replacement.
-- `fetch` / undici global dispatcher: covered by the `globalThis.fetch` patch and `setGlobalDispatcher`.
+- `globalThis.fetch`: covered by the fetch patch, including explicit dispatcher options and later Undici global dispatcher replacement in managed mode.
+- Undici global dispatcher: installed for Undici APIs that read the current process dispatcher.
 - WebSocket clients accepting a Node `agent`: covered with `proxy.createWebSocketAgent()`.
 - WebSocket clients without an `agent` option: partially covered when the upgrade path reuses patched `http.request`.
 - Explicit HTTP CONNECT sockets: covered with `openProxyConnectTunnel()`.

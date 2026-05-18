@@ -197,6 +197,24 @@ test("package entrypoint managed fetch ignores explicit dispatcher overrides", a
   }
 });
 
+test("package entrypoint managed fetch rejects invalid primitive init values", async () => {
+  const lab = await startProxyLab();
+  const proxy = installGlobalProxy({ mode: "managed", proxyUrl: lab.proxyUrl });
+  try {
+    await assert.rejects(
+      async () => {
+        await Reflect.apply(globalThis.fetch, globalThis, [`${lab.targetUrl}/allowed`, 1]);
+      },
+      (error: unknown) => error instanceof TypeError &&
+        error.message.includes("Request constructor"),
+    );
+    assert.equal(lab.events.length, 0);
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
 test("package entrypoint preserves standard options on preinstall Requests", async () => {
   const lab = await startProxyLab();
   const requestUnknown: unknown = Reflect.construct(globalThis.Request, [

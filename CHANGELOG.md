@@ -2,6 +2,8 @@
 
 ## 0.3.3 - Unreleased
 
+- Fixed managed `globalThis.fetch` so later Undici global dispatcher replacement cannot bypass the active Proxyline dispatcher.
+
 ## 0.3.2 - 2026-05-17
 
 - Fixed managed Undici proxy dispatchers so HTTPS proxy endpoints addressed by IP do not send invalid IP-literal SNI.
