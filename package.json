@@ -53,7 +53,13 @@
     "prepare": "node scripts/prepack-build.mjs",
     "publish:dry-run": "pnpm publish --dry-run --access public",
     "test": "pnpm build && tsx --test test/index.test.ts test/e2e.test.ts test/package.test.ts test/scripts.test.ts && tsx --test test/package-artifact.test.ts",
-    "typecheck": "pnpm build && tsc --noEmit"
+    "typecheck": "pnpm build && tsc --noEmit",
+    "check:changed": "pnpm run check",
+    "test:changed": "pnpm run test",
+    "crabbox:hydrate": "crabbox actions hydrate",
+    "crabbox:run": "crabbox run",
+    "crabbox:stop": "crabbox stop",
+    "crabbox:warmup": "crabbox warmup"
   },
   "devDependencies": {
     "@types/node": "25.8.0",
