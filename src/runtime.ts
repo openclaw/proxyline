@@ -1,7 +1,9 @@
 import http from "node:http";
 import https from "node:https";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { X509Certificate } from "node:crypto";
 import net from "node:net";
+import tls from "node:tls";
 import {
   Agent as UndiciAgent,
   Dispatcher,
@@ -483,6 +485,21 @@ function stripIpServernameFromConnect(connect: unknown): unknown {
     (connect as UnknownFunction)(stripIpServernameFromConnectOptions(options), callback);
 }
 
+const checkProxyServerIdentity: typeof tls.checkServerIdentity = (hostname, certificate) => {
+  const normalizedHostname = hostname.replace(/^\[|\]$/g, "");
+  if (net.isIP(normalizedHostname) === 6) {
+    try {
+      // Compare binary addresses so compressed and expanded IPv6 SAN forms remain equivalent.
+      if (new X509Certificate(certificate.raw).checkIP(normalizedHostname) !== undefined) {
+        return undefined;
+      }
+    } catch {
+      // Let Node return its canonical certificate validation error below.
+    }
+  }
+  return tls.checkServerIdentity(normalizedHostname, certificate);
+};
+
 function createProxyClientFactory(): UndiciProxyClientFactory {
   return (origin: URL, options: object): Dispatcher => {
     const clientOptions = isObjectRecord(options)
@@ -499,11 +516,19 @@ function createUndiciProxyAgent(
   proxyUrl: string,
   options: UndiciDispatcherOptions,
 ): UndiciProxyAgent {
+  const proxyHostname = new URL(proxyUrl).hostname.replace(/^\[|\]$/g, "");
+  const proxyTls =
+    options.proxyCa !== undefined || net.isIP(proxyHostname) === 6
+      ? {
+          ...(options.proxyCa !== undefined ? { ca: options.proxyCa } : {}),
+          ...(net.isIP(proxyHostname) === 6 ? { checkServerIdentity: checkProxyServerIdentity } : {}),
+        }
+      : undefined;
   return new UndiciProxyAgent({
     ...resolveUndiciBaseOptions(options.undici),
     uri: proxyUrl,
     clientFactory: createProxyClientFactory(),
-    ...(options.proxyCa !== undefined ? { proxyTls: { ca: options.proxyCa } } : {}),
+    ...(proxyTls !== undefined ? { proxyTls } : {}),
   } as ConstructorParameters<typeof UndiciProxyAgent>[0]);
 }
 
