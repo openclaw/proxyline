@@ -2,6 +2,8 @@
 
 ## 0.3.4 - Unreleased
 
+- Updated Undici to 8.5.0 and raised the compatible peer floor to pick up current security fixes; refreshed pnpm, Node types, and transitive esbuild tooling.
+
 ## 0.3.3 - 2026-05-18
 
 - Fixed managed `globalThis.fetch` so later Undici global dispatcher replacement cannot bypass the active Proxyline dispatcher. Thanks @jesse-merhi.
