@@ -1,5 +1,6 @@
 allowBuilds:
   esbuild: true
+minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
   - '@typescript/*'
   - typescript
