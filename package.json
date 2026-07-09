@@ -62,11 +62,11 @@
     "crabbox:warmup": "crabbox warmup"
   },
   "devDependencies": {
-    "@types/node": "26.0.1",
+    "@types/node": "26.1.1",
     "@types/ws": "8.18.1",
-    "tsx": "4.22.4",
-    "typescript": "6.0.3",
-    "undici": "^8.5.0",
+    "tsx": "4.23.0",
+    "typescript": "^7.0.2",
+    "undici": "8.6.0",
     "ws": "8.21.0"
   },
   "engines": {

@@ -1,12 +1,17 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { dirname, resolve } from "node:path";
 
 const require = createRequire(import.meta.url);
 
 function resolveTypeScriptCompiler() {
   try {
-    return require.resolve("typescript/bin/tsc");
+    const packageJsonPath = require.resolve("typescript/package.json");
+    const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+    const compiler = typeof packageJson.bin === "string" ? packageJson.bin : packageJson.bin?.tsc;
+    return typeof compiler === "string" ? resolve(dirname(packageJsonPath), compiler) : undefined;
   } catch {
     return undefined;
   }
