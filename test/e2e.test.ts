@@ -1898,6 +1898,50 @@ test("CONNECT helper times out stalled proxy responses", async () => {
   });
 });
 
+test("CONNECT helper rejects an already-aborted signal without starting CONNECT", async () => {
+  await withStalledConnectProxy(async (proxyUrl, activeSockets) => {
+    const controller = new AbortController();
+    controller.abort(new Error("connect cancelled"));
+
+    await assert.rejects(
+      openProxyConnectTunnel({
+        proxyUrl,
+        targetHost: "api.example.com",
+        targetPort: 443,
+        timeoutMs: 1_000,
+        signal: controller.signal,
+      }),
+      /connect cancelled/,
+    );
+    assert.equal(activeSockets.size, 0);
+  });
+});
+
+test("CONNECT helper aborts a stalled handshake and destroys its socket", async () => {
+  await withStalledConnectProxy(async (proxyUrl, activeSockets) => {
+    const controller = new AbortController();
+    const connecting = openProxyConnectTunnel({
+      proxyUrl,
+      targetHost: "api.example.com",
+      targetPort: 443,
+      timeoutMs: 10_000,
+      signal: controller.signal,
+    });
+    for (let attempt = 0; attempt < 20 && activeSockets.size === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.equal(activeSockets.size, 1);
+
+    controller.abort(new Error("connect cancelled"));
+
+    await assert.rejects(connecting, /connect cancelled/);
+    for (let attempt = 0; attempt < 20 && activeSockets.size > 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.equal(activeSockets.size, 0);
+  });
+});
+
 test("CONNECT helper rejects proxy close before response", async () => {
   const proxy = http.createServer();
   proxy.on("connect", (_req, socket) => {
@@ -1932,13 +1976,16 @@ test("CONNECT helper rejects proxy close before response", async () => {
 test("CONNECT helper opens an explicit tunnel through the lab proxy", async () => {
   const lab = await startProxyLab();
   const target = new URL(lab.targetUrl);
+  const controller = new AbortController();
   const socket = await openProxyConnectTunnel({
     proxyUrl: lab.proxyUrl,
     targetHost: target.hostname,
     targetPort: Number(target.port),
     timeoutMs: 1_000,
+    signal: controller.signal,
   });
   try {
+    controller.abort(new Error("handshake already completed"));
     const response = await new Promise<string>((resolve, reject) => {
       let body = "";
       socket.setEncoding("utf8");

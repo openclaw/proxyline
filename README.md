@@ -78,12 +78,14 @@ const socket = new WebSocket("wss://events.example.com/", {
 ```ts
 import { openProxyConnectTunnel } from "@openclaw/proxyline";
 
+const controller = new AbortController();
 const socket = await openProxyConnectTunnel({
   proxyUrl: "https://proxy.corp.example:8443",
   proxyTls: { caFile: "/etc/proxy-ca.pem" },
   targetHost: "api.example.com",
   targetPort: 443,
   timeoutMs: 2_000,
+  signal: controller.signal,
 });
 ```
 

@@ -8,6 +8,7 @@ export type OpenProxyConnectTunnelOptions = Readonly<{
   targetHost: string;
   targetPort: number;
   timeoutMs?: number;
+  signal?: AbortSignal;
 }>;
 
 const MAX_CONNECT_RESPONSE_HEADER_BYTES = 16 * 1024;
@@ -131,6 +132,7 @@ export async function openProxyConnectTunnel(
       socket?.off("close", onClosed);
       socket?.off("connect", onConnected);
       socket?.off("secureConnect", onConnected);
+      options.signal?.removeEventListener("abort", onAbort);
     };
 
     const fail = (error: unknown): void => {
@@ -203,7 +205,16 @@ export async function openProxyConnectTunnel(
       fail(new Error("proxy socket closed before CONNECT response"));
     };
 
+    const onAbort = (): void => {
+      fail(options.signal?.reason ?? new Error("proxy CONNECT aborted"));
+    };
+
     try {
+      options.signal?.addEventListener("abort", onAbort, { once: true });
+      if (options.signal?.aborted) {
+        onAbort();
+        return;
+      }
       if (options.timeoutMs !== undefined && options.timeoutMs > 0) {
         timeout = setTimeout(() => {
           fail(new Error(`proxy CONNECT timed out after ${Math.trunc(options.timeoutMs ?? 0)}ms`));

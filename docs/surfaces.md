@@ -83,6 +83,7 @@ const socket = await openProxyConnectTunnel({
   targetHost: "api.example.com",
   targetPort: 443,
   timeoutMs: 2_000,
+  signal: AbortSignal.timeout(2_000),
 });
 ```
 
@@ -93,6 +94,7 @@ Properties:
 - Userinfo in the `proxyUrl` becomes a `Proxy-Authorization: Basic ...` header.
 - A bounded `16 KiB` header buffer protects against malicious or runaway proxy responses.
 - `timeoutMs` is enforced and emits a `CONNECT_FAILED` error on expiry.
+- `signal` aborts an in-progress handshake and destroys its active proxy socket.
 - Bytes the proxy sends after the response headers are re-injected with `socket.unshift()` so the caller sees the full target stream.
 - Non-2xx status lines, header overrun, premature close, and socket errors are all surfaced as `ProxylineError` with code `CONNECT_FAILED`.
 
