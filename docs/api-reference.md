@@ -257,6 +257,7 @@ type OpenProxyConnectTunnelOptions = Readonly<{
   targetHost: string;
   targetPort: number;
   timeoutMs?: number;
+  signal?: AbortSignal;
 }>;
 ```
 
@@ -264,6 +265,7 @@ type OpenProxyConnectTunnelOptions = Readonly<{
 - `proxyTls` — CA trust for HTTPS proxies. See [Proxy TLS](./proxy-tls.md).
 - `targetHost` / `targetPort` — what to ask the proxy to connect to.
 - `timeoutMs` — overall budget for the CONNECT handshake.
+- `signal` — optional caller cancellation; aborting rejects the handshake and destroys its active proxy socket.
 
 ### `AmbientNodeProxyAgentOptions`
 

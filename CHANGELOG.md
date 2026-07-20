@@ -2,6 +2,7 @@
 
 ## 0.3.4 - Unreleased
 
+- Added `AbortSignal` cancellation to explicit CONNECT tunnels, including active socket cleanup.
 - Fixed managed HTTPS proxy connections to IPv6 literal endpoints so equivalent compressed and expanded certificate addresses validate without sending IP-literal SNI.
 - Updated Undici to 8.5.0 and raised the compatible peer floor to pick up current security fixes; refreshed pnpm, Node types, and transitive esbuild tooling.
 
