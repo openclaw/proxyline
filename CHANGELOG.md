@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.5 - Unreleased
+
 ## 0.3.4 - 2026-07-20
 
 - Added `AbortSignal` cancellation to explicit CONNECT tunnels, including active socket cleanup.
