@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.4 - Unreleased
+## 0.3.4 - 2026-07-20
 
 - Added `AbortSignal` cancellation to explicit CONNECT tunnels, including active socket cleanup.
 - Fixed managed HTTPS proxy connections to IPv6 literal endpoints so equivalent compressed and expanded certificate addresses validate without sending IP-literal SNI.
