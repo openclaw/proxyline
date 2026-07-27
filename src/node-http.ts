@@ -9,7 +9,7 @@ import {
   type ProxyEnvSnapshot,
 } from "./env.js";
 import { formatConnectAuthority } from "./connect.js";
-import { ProxylineError, resolveProxyTlsCa, type ProxylineTlsOptions } from "./shared.js";
+import { ProxylineError, decodeProxyUserinfoComponent, resolveProxyTlsCa, type ProxylineTlsOptions } from "./shared.js";
 import type { ProxylineSurface, ProxyResolver } from "./types.js";
 
 export type NodeHttpRequestOptions = http.RequestOptions & https.RequestOptions & {
@@ -198,8 +198,8 @@ function proxyAuthorization(proxy: URL): string | undefined {
   if (!proxy.username && !proxy.password) {
     return undefined;
   }
-  const username = decodeURIComponent(proxy.username);
-  const password = decodeURIComponent(proxy.password);
+  const username = decodeProxyUserinfoComponent(proxy.username);
+  const password = decodeProxyUserinfoComponent(proxy.password);
   return `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
 }
 
