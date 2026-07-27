@@ -2,7 +2,6 @@
 
 ## 0.3.5 - Unreleased
 
-- Fixed CONNECT and Node agent proxy Basic auth so invalid percent-encoding in username/password fails closed with `INVALID_PROXY_USERINFO` instead of throwing `URIError` mid-tunnel setup.
 ## 0.3.4 - 2026-07-20
 
 - Added `AbortSignal` cancellation to explicit CONNECT tunnels, including active socket cleanup.
