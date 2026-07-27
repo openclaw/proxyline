@@ -15,6 +15,18 @@ export class ProxylineError extends Error {
   }
 }
 
+/** Decode proxy userinfo; invalid percent-encoding must not throw URIError mid-CONNECT. */
+export function decodeProxyUserinfoComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    throw new ProxylineError(
+      "INVALID_PROXY_USERINFO",
+      "Proxy username or password contains invalid percent-encoding.",
+    );
+  }
+}
+
 export function resolveProxyTlsCa(options: ProxylineTlsOptions | undefined): string | undefined {
   if (!options) {
     return undefined;
