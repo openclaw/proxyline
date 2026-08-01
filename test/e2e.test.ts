@@ -1870,6 +1870,44 @@ test("CONNECT helper sends proxy authorization from proxy URL credentials", asyn
   }
 });
 
+test("CONNECT helper rejects invalid proxy userinfo through its promise", async () => {
+  const lab = await startProxyLab();
+  const target = new URL(lab.targetUrl);
+  const proxyUrl = lab.proxyUrl.replace("://", "://user%ZZ:secret@");
+  try {
+    await assert.rejects(
+      openProxyConnectTunnel({
+        proxyUrl,
+        targetHost: target.hostname,
+        targetPort: Number(target.port),
+        timeoutMs: 1_000,
+      }),
+      (error: unknown) =>
+        error instanceof ProxylineError && error.code === "INVALID_PROXY_USERINFO",
+    );
+    assert.ok(!lab.events.some((event) => event.type === "connect"));
+  } finally {
+    await lab.close();
+  }
+});
+
+test("node CONNECT agents emit invalid proxy userinfo as a request error", async () => {
+  const lab = await startProxyLab({ secureTarget: true });
+  const proxyUrl = lab.proxyUrl.replace("://", "://user%ZZ:secret@");
+  const proxy = installGlobalProxy({ mode: "managed", proxyUrl });
+  try {
+    await assert.rejects(
+      readHttps(lab.targetUrl, { ca: lab.targetCa }),
+      (error: unknown) =>
+        error instanceof ProxylineError && error.code === "INVALID_PROXY_USERINFO",
+    );
+    assert.ok(!lab.events.some((event) => event.type === "connect"));
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
 test("CONNECT helper rejects non-2xx proxy responses", async () => {
   await withConnectRecorder(async (proxyUrl) => {
     await assert.rejects(

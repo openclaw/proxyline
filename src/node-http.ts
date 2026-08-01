@@ -591,25 +591,22 @@ class ProxylineConnectAgent extends http.Agent {
     };
 
     const onConnected = (): void => {
-      let target: { host: string; port: number };
       try {
-        target = connectTarget(options);
+        const { host, port } = connectTarget(options);
+        const authority = formatConnectAuthority(host, port);
+        const headers = [
+          `CONNECT ${authority} HTTP/1.1`,
+          `Host: ${authority}`,
+          `Proxy-Connection: ${this.#keepAlive ? "Keep-Alive" : "close"}`,
+        ];
+        const authorization = proxyAuthorization(this.#proxy);
+        if (authorization !== undefined) {
+          headers.push(`Proxy-Authorization: ${authorization}`);
+        }
+        proxySocket.write([...headers, "", ""].join("\r\n"));
       } catch (error) {
         fail(error instanceof Error ? error : new Error(String(error)));
-        return;
       }
-      const { host, port } = target;
-      const authority = formatConnectAuthority(host, port);
-      const headers = [
-        `CONNECT ${authority} HTTP/1.1`,
-        `Host: ${authority}`,
-        `Proxy-Connection: ${this.#keepAlive ? "Keep-Alive" : "close"}`,
-      ];
-      const authorization = proxyAuthorization(this.#proxy);
-      if (authorization !== undefined) {
-        headers.push(`Proxy-Authorization: ${authorization}`);
-      }
-      proxySocket.write([...headers, "", ""].join("\r\n"));
     };
 
     const onData = (chunk: Buffer): void => {

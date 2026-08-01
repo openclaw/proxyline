@@ -142,7 +142,7 @@ export async function openProxyConnectTunnel(
       settled = true;
       cleanup();
       socket?.destroy();
-      reject(failConnect(proxy, error));
+      reject(error instanceof ProxylineError ? error : failConnect(proxy, error));
     };
 
     const succeed = (connectedSocket: ProxySocket, tunneledBytes: Buffer | undefined): void => {
@@ -163,7 +163,11 @@ export async function openProxyConnectTunnel(
         fail(new Error("proxy socket missing after connect"));
         return;
       }
-      writeConnectRequest(socket, proxy, target);
+      try {
+        writeConnectRequest(socket, proxy, target);
+      } catch (error) {
+        fail(error);
+      }
     };
 
     const onData = (chunk: Buffer): void => {
