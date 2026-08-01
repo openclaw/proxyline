@@ -2,6 +2,8 @@
 
 ## 0.3.5 - Unreleased
 
+- Fixed malformed percent-encoding in proxy credentials to fail through CONNECT promises and Node request errors with `INVALID_PROXY_USERINFO`. Thanks @SebTardif.
+
 ## 0.3.4 - 2026-07-20
 
 - Added `AbortSignal` cancellation to explicit CONNECT tunnels, including active socket cleanup.

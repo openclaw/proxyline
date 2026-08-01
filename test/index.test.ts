@@ -710,6 +710,22 @@ test("CONNECT authority formatting rejects unsafe hosts and brackets IPv6", () =
     (error: unknown) =>
       error instanceof ProxylineError && error.code === "INVALID_CONNECT_TARGET",
   );
+  for (const unsafeHost of [
+    "[api.example.com",
+    "api.example.com]",
+    "api.example.com:443",
+    "api.example.com/path",
+    "user@api.example.com",
+    "api.example.com?debug=true",
+    "api.example.com#fragment",
+  ]) {
+    assert.throws(
+      () => formatConnectAuthority(unsafeHost, 443),
+      (error: unknown) =>
+        error instanceof ProxylineError && error.code === "INVALID_CONNECT_TARGET",
+    );
+  }
+});
 
 test("decodeProxyUserinfoComponent accepts valid encoding", () => {
   assert.equal(decodeProxyUserinfoComponent("alice%40example.com"), "alice@example.com");
@@ -727,23 +743,6 @@ test("decodeProxyUserinfoComponent fails closed on invalid percent-encoding", ()
     (error) =>
       error instanceof ProxylineError && error.code === "INVALID_PROXY_USERINFO",
   );
-});
-
-  for (const unsafeHost of [
-    "[api.example.com",
-    "api.example.com]",
-    "api.example.com:443",
-    "api.example.com/path",
-    "user@api.example.com",
-    "api.example.com?debug=true",
-    "api.example.com#fragment",
-  ]) {
-    assert.throws(
-      () => formatConnectAuthority(unsafeHost, 443),
-      (error: unknown) =>
-        error instanceof ProxylineError && error.code === "INVALID_CONNECT_TARGET",
-    );
-  }
 });
 
 test("CONNECT helper rejects unsupported proxy schemes with the documented code", async () => {
