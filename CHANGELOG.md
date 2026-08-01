@@ -2,6 +2,8 @@
 
 ## 0.3.5 - Unreleased
 
+- Updated Undici, WebSocket and TypeScript tooling, pnpm, and pinned GitHub Actions to their latest stable releases.
+
 ## 0.3.4 - 2026-07-20
 
 - Added `AbortSignal` cancellation to explicit CONNECT tunnels, including active socket cleanup.
