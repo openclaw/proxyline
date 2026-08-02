@@ -3,7 +3,6 @@
 ## 0.3.5 - Unreleased
 
 - Fixed malformed percent-encoding in proxy credentials to fail through CONNECT promises and Node request errors with `INVALID_PROXY_USERINFO`. Thanks @SebTardif.
-- Updated Undici, WebSocket and TypeScript tooling, pnpm, and pinned GitHub Actions to their latest stable releases.
 
 ## 0.3.4 - 2026-07-20
 

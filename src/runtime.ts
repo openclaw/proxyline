@@ -524,27 +524,12 @@ function createUndiciProxyAgent(
           ...(net.isIP(proxyHostname) === 6 ? { checkServerIdentity: checkProxyServerIdentity } : {}),
         }
       : undefined;
-  const dispatcherFactory = createProxyClientFactory();
   return new UndiciProxyAgent({
     ...resolveUndiciBaseOptions(options.undici),
     uri: proxyUrl,
-    clientFactory: dispatcherFactory,
-    factory: dispatcherFactory,
+    clientFactory: createProxyClientFactory(),
     ...(proxyTls !== undefined ? { proxyTls } : {}),
   } as ConstructorParameters<typeof UndiciProxyAgent>[0]);
-}
-
-function normalizeUndiciDispatchOptions(
-  options: Dispatcher.DispatchOptions,
-): Dispatcher.DispatchOptions {
-  if (options.origin === undefined || !/^https?:\/\//i.test(options.path)) {
-    return options;
-  }
-  const pathUrl = new URL(options.path);
-  return {
-    ...options,
-    path: `${pathUrl.pathname}${pathUrl.search}`,
-  };
 }
 
 function createUndiciProxyDispatcher(
@@ -600,11 +585,10 @@ class ManagedUndiciDispatcher extends Dispatcher {
     if (this.#closedError !== undefined) {
       return reportClosedDispatchError(handler, this.#closedError);
     }
-    const normalizedOptions = normalizeUndiciDispatchOptions(options);
-    const url = resolveUndiciDispatchUrl(normalizedOptions);
+    const url = resolveUndiciDispatchUrl(options);
     const proxyUrl = url === undefined ? "" : this.#resolver.getProxyForUrl(url, "undici");
     const dispatcher = proxyUrl === "" ? this.#directDispatcher : this.#proxyDispatcher(proxyUrl);
-    return dispatcher.dispatch(normalizedOptions, handler);
+    return dispatcher.dispatch(options, handler);
   }
 
   public override close(callback: () => void): void;
@@ -687,11 +671,10 @@ class AmbientUndiciDispatcher extends Dispatcher {
     if (this.#closedError !== undefined) {
       return reportClosedDispatchError(handler, this.#closedError);
     }
-    const normalizedOptions = normalizeUndiciDispatchOptions(options);
-    const url = resolveUndiciDispatchUrl(normalizedOptions);
+    const url = resolveUndiciDispatchUrl(options);
     const proxyUrl = url === undefined ? undefined : resolveAmbientProxyForUrl(url, this.#env);
     const dispatcher = proxyUrl === undefined ? this.#directDispatcher : this.#proxyDispatcher(proxyUrl);
-    return dispatcher.dispatch(normalizedOptions, handler);
+    return dispatcher.dispatch(options, handler);
   }
 
   public override close(callback: () => void): void;
