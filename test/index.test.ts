@@ -15,6 +15,7 @@ import {
   type ProxylineEvent,
 } from "../src/index.js";
 import { formatConnectAuthority } from "../src/connect.js";
+import { decodeProxyUserinfoComponent } from "../src/shared.js";
 import { bindNodeHttpMethod, CALLER_AGENT_TLS_OPTION_KEYS } from "../src/node-http.js";
 
 function withProxyEnv<T>(env: Record<string, string | undefined>, run: () => T): T {
@@ -724,6 +725,24 @@ test("CONNECT authority formatting rejects unsafe hosts and brackets IPv6", () =
         error instanceof ProxylineError && error.code === "INVALID_CONNECT_TARGET",
     );
   }
+});
+
+test("decodeProxyUserinfoComponent accepts valid encoding", () => {
+  assert.equal(decodeProxyUserinfoComponent("alice%40example.com"), "alice@example.com");
+  assert.equal(decodeProxyUserinfoComponent("s3cr3t"), "s3cr3t");
+});
+
+test("decodeProxyUserinfoComponent fails closed on invalid percent-encoding", () => {
+  assert.throws(
+    () => decodeProxyUserinfoComponent("user%ZZ"),
+    (error) =>
+      error instanceof ProxylineError && error.code === "INVALID_PROXY_USERINFO",
+  );
+  assert.throws(
+    () => decodeProxyUserinfoComponent("%E0%A4%A"),
+    (error) =>
+      error instanceof ProxylineError && error.code === "INVALID_PROXY_USERINFO",
+  );
 });
 
 test("CONNECT helper rejects unsupported proxy schemes with the documented code", async () => {

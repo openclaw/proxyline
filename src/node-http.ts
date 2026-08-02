@@ -9,7 +9,7 @@ import {
   type ProxyEnvSnapshot,
 } from "./env.js";
 import { formatConnectAuthority } from "./connect.js";
-import { ProxylineError, resolveProxyTlsCa, type ProxylineTlsOptions } from "./shared.js";
+import { ProxylineError, decodeProxyUserinfoComponent, resolveProxyTlsCa, type ProxylineTlsOptions } from "./shared.js";
 import type { ProxylineSurface, ProxyResolver } from "./types.js";
 
 export type NodeHttpRequestOptions = http.RequestOptions & https.RequestOptions & {
@@ -198,8 +198,8 @@ function proxyAuthorization(proxy: URL): string | undefined {
   if (!proxy.username && !proxy.password) {
     return undefined;
   }
-  const username = decodeURIComponent(proxy.username);
-  const password = decodeURIComponent(proxy.password);
+  const username = decodeProxyUserinfoComponent(proxy.username);
+  const password = decodeProxyUserinfoComponent(proxy.password);
   return `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
 }
 
@@ -591,25 +591,22 @@ class ProxylineConnectAgent extends http.Agent {
     };
 
     const onConnected = (): void => {
-      let target: { host: string; port: number };
       try {
-        target = connectTarget(options);
+        const { host, port } = connectTarget(options);
+        const authority = formatConnectAuthority(host, port);
+        const headers = [
+          `CONNECT ${authority} HTTP/1.1`,
+          `Host: ${authority}`,
+          `Proxy-Connection: ${this.#keepAlive ? "Keep-Alive" : "close"}`,
+        ];
+        const authorization = proxyAuthorization(this.#proxy);
+        if (authorization !== undefined) {
+          headers.push(`Proxy-Authorization: ${authorization}`);
+        }
+        proxySocket.write([...headers, "", ""].join("\r\n"));
       } catch (error) {
         fail(error instanceof Error ? error : new Error(String(error)));
-        return;
       }
-      const { host, port } = target;
-      const authority = formatConnectAuthority(host, port);
-      const headers = [
-        `CONNECT ${authority} HTTP/1.1`,
-        `Host: ${authority}`,
-        `Proxy-Connection: ${this.#keepAlive ? "Keep-Alive" : "close"}`,
-      ];
-      const authorization = proxyAuthorization(this.#proxy);
-      if (authorization !== undefined) {
-        headers.push(`Proxy-Authorization: ${authorization}`);
-      }
-      proxySocket.write([...headers, "", ""].join("\r\n"));
     };
 
     const onData = (chunk: Buffer): void => {

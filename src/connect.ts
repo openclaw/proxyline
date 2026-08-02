@@ -1,6 +1,6 @@
 import net from "node:net";
 import tls from "node:tls";
-import { ProxylineError, type ProxylineTlsOptions, redactProxyUrl, resolveProxyTlsCa } from "./shared.js";
+import { ProxylineError, decodeProxyUserinfoComponent, type ProxylineTlsOptions, redactProxyUrl, resolveProxyTlsCa } from "./shared.js";
 
 export type OpenProxyConnectTunnelOptions = Readonly<{
   proxyUrl: string | URL;
@@ -32,8 +32,8 @@ function resolveProxyAuthorization(proxy: URL): string | undefined {
   if (!proxy.username && !proxy.password) {
     return undefined;
   }
-  const username = decodeURIComponent(proxy.username);
-  const password = decodeURIComponent(proxy.password);
+  const username = decodeProxyUserinfoComponent(proxy.username);
+  const password = decodeProxyUserinfoComponent(proxy.password);
   return `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
 }
 
@@ -142,7 +142,7 @@ export async function openProxyConnectTunnel(
       settled = true;
       cleanup();
       socket?.destroy();
-      reject(failConnect(proxy, error));
+      reject(error instanceof ProxylineError ? error : failConnect(proxy, error));
     };
 
     const succeed = (connectedSocket: ProxySocket, tunneledBytes: Buffer | undefined): void => {
@@ -163,7 +163,11 @@ export async function openProxyConnectTunnel(
         fail(new Error("proxy socket missing after connect"));
         return;
       }
-      writeConnectRequest(socket, proxy, target);
+      try {
+        writeConnectRequest(socket, proxy, target);
+      } catch (error) {
+        fail(error);
+      }
     };
 
     const onData = (chunk: Buffer): void => {
