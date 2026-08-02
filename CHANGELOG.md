@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.6 - Unreleased
+
 ## 0.3.5 - 2026-08-01
 
 - Fixed malformed percent-encoding in proxy credentials to fail through CONNECT promises and Node request errors with `INVALID_PROXY_USERINFO`. Thanks @SebTardif.
