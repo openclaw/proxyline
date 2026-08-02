@@ -264,7 +264,7 @@ type OpenProxyConnectTunnelOptions = Readonly<{
 - `proxyUrl` — `http://` or `https://`. Userinfo becomes a `Proxy-Authorization: Basic` header.
 - `proxyTls` — CA trust for HTTPS proxies. See [Proxy TLS](./proxy-tls.md).
 - `targetHost` / `targetPort` — what to ask the proxy to connect to.
-- `timeoutMs` — overall budget for the CONNECT handshake.
+- `timeoutMs` — overall budget for the CONNECT handshake. Defaults to `30000` when omitted. Pass `0` for no timeout.
 - `signal` — optional caller cancellation; aborting rejects the handshake and destroys its active proxy socket.
 
 ### `AmbientNodeProxyAgentOptions`

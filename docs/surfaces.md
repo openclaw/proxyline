@@ -93,7 +93,7 @@ Properties:
 - HTTPS proxies use ALPN `http/1.1`. SNI is the proxy hostname unless that is an IP literal.
 - Userinfo in the `proxyUrl` becomes a `Proxy-Authorization: Basic ...` header.
 - A bounded `16 KiB` header buffer protects against malicious or runaway proxy responses.
-- `timeoutMs` is enforced and emits a `CONNECT_FAILED` error on expiry.
+- `timeoutMs` is enforced and emits a `CONNECT_FAILED` error on expiry. When omitted, the default is 30 seconds; pass `0` for no timeout.
 - `signal` aborts an in-progress handshake and destroys its active proxy socket.
 - Bytes the proxy sends after the response headers are re-injected with `socket.unshift()` so the caller sees the full target stream.
 - Non-2xx status lines, header overrun, premature close, and socket errors are all surfaced as `ProxylineError` with code `CONNECT_FAILED`.

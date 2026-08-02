@@ -5,6 +5,7 @@ import test from "node:test";
 import type { Dispatcher } from "undici";
 import {
   createAmbientNodeProxyAgent,
+  DEFAULT_PROXY_CONNECT_TIMEOUT_MS,
   hasAmbientNodeProxyConfigured,
   installGlobalProxy,
   installProxyline,
@@ -12,6 +13,7 @@ import {
   openProxyConnectTunnel,
   ProxylineError,
   redactProxyUrl,
+  resolveProxyConnectTimeoutMs,
   type ProxylineEvent,
 } from "../src/index.js";
 import { formatConnectAuthority } from "../src/connect.js";
@@ -755,4 +757,14 @@ test("CONNECT helper rejects unsupported proxy schemes with the documented code"
     (error: unknown) =>
       error instanceof ProxylineError && error.code === "UNSUPPORTED_PROXY_PROTOCOL",
   );
+});
+
+test("resolveProxyConnectTimeoutMs defaults omitted timeout to 30s and treats 0 as unbounded", () => {
+  assert.equal(resolveProxyConnectTimeoutMs(undefined), DEFAULT_PROXY_CONNECT_TIMEOUT_MS);
+  assert.equal(DEFAULT_PROXY_CONNECT_TIMEOUT_MS, 30_000);
+  assert.equal(resolveProxyConnectTimeoutMs(0), undefined);
+  assert.equal(resolveProxyConnectTimeoutMs(-5), undefined);
+  assert.equal(resolveProxyConnectTimeoutMs(0.9), undefined);
+  assert.equal(resolveProxyConnectTimeoutMs(1500.9), 1500);
+  assert.equal(resolveProxyConnectTimeoutMs(20), 20);
 });
