@@ -1,9 +1,4 @@
-export {
-  DEFAULT_PROXY_CONNECT_TIMEOUT_MS,
-  openProxyConnectTunnel,
-  resolveProxyConnectTimeoutMs,
-  type OpenProxyConnectTunnelOptions,
-} from "./connect.js";
+export { openProxyConnectTunnel, type OpenProxyConnectTunnelOptions } from "./connect.js";
 export {
   createAmbientNodeProxyAgent,
   hasAmbientNodeProxyConfigured,
