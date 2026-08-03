@@ -640,6 +640,48 @@ test("managed mode times out stalled node:https CONNECT handshakes", async () =>
   });
 });
 
+test("node CONNECT agent defaults omitted timeout to 30 seconds", async (t) => {
+  const originalSetTimeout = globalThis.setTimeout;
+  const observedTimeouts: number[] = [];
+  t.mock.method(
+    globalThis,
+    "setTimeout",
+    ((callback: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => {
+      observedTimeouts.push(delay ?? 0);
+      return originalSetTimeout(callback, delay === 30_000 ? 20 : delay, ...args);
+    }) as typeof setTimeout,
+  );
+
+  await withStalledConnectProxy(async (proxyUrl) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
+    };
+    const agent = createNodeProxyAgent(resolver, undefined, "https");
+    try {
+      await assert.rejects(
+        new Promise<void>((resolve, reject) => {
+          const req = https.get("https://example.test/allowed", { agent }, () => {
+            resolve();
+          });
+          req.on("error", reject);
+        }),
+        /timed out/,
+      );
+    } finally {
+      agent.destroy();
+    }
+  });
+  assert.ok(
+    observedTimeouts.includes(30_000),
+    `expected a 30s CONNECT timeout, got ${JSON.stringify(observedTimeouts)}`,
+  );
+});
+
 test("managed mode honors req.setTimeout during stalled node:https CONNECT handshakes", async () => {
   await withStalledConnectProxy(async (proxyUrl, activeSockets) => {
     const proxy = installGlobalProxy({
