@@ -33,6 +33,9 @@ jobs:
           cache-dependency-path: pnpm-lock.yaml
           registry-url: https://registry.npmjs.org/
 
+      - name: Set up npm trusted publishing
+        run: npm install --global npm@11.19.0
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
