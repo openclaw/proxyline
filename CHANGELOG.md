@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.6 - Unreleased
+## 0.3.6 - 2026-08-02
 
 - Fixed HTTP forwarding through HTTPS proxies to wait for the proxy TLS handshake before assigning the socket to Node's agent. Thanks @SebTardif.
 - Added a 30-second default timeout to `openProxyConnectTunnel` when `timeoutMs` is omitted; pass `0` for unbounded waits. Thanks @SebTardif.
