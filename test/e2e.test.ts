@@ -1936,6 +1936,31 @@ test("CONNECT helper times out stalled proxy responses", async () => {
   });
 });
 
+test("CONNECT helper defaults omitted timeout to 30 seconds", async (t) => {
+  const originalSetTimeout = globalThis.setTimeout;
+  const observedTimeouts: number[] = [];
+  t.mock.method(
+    globalThis,
+    "setTimeout",
+    ((callback: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => {
+      observedTimeouts.push(delay ?? 0);
+      return originalSetTimeout(callback, delay === 30_000 ? 20 : delay, ...args);
+    }) as typeof setTimeout,
+  );
+
+  await withStalledConnectProxy(async (proxyUrl) => {
+    await assert.rejects(
+      openProxyConnectTunnel({
+        proxyUrl,
+        targetHost: "api.example.com",
+        targetPort: 443,
+      }),
+      /timed out after 30000ms/,
+    );
+  });
+  assert.deepEqual(observedTimeouts, [30_000]);
+});
+
 test("CONNECT helper rejects an already-aborted signal without starting CONNECT", async () => {
   await withStalledConnectProxy(async (proxyUrl, activeSockets) => {
     const controller = new AbortController();

@@ -2,7 +2,7 @@
 
 ## 0.3.6 - Unreleased
 
-- Apply a 30s default timeout to `openProxyConnectTunnel` when `timeoutMs` is omitted; pass `0` for unbounded waits. Thanks @SebTardif.
+- Added a 30-second default timeout to `openProxyConnectTunnel` when `timeoutMs` is omitted; pass `0` for unbounded waits. Thanks @SebTardif.
 
 ## 0.3.5 - 2026-08-01
 
