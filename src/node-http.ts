@@ -442,6 +442,9 @@ class ProxylineHttpForwardAgent extends http.Agent {
     callback?: (error: Error | null, socket: net.Socket) => void,
   ): net.Socket {
     const socket = connectToProxy(this.#proxy, this.#proxyTls);
+    // When Node supplies an async callback, deliver the socket only through that
+    // path. Returning the same socket as well double-invokes Agent setup and can
+    // hand an unready TLS proxy socket to plain HTTP forward traffic.
     if (callback !== undefined) {
       const onError = (error: Error): void => {
         callback(error, socket);
@@ -452,6 +455,7 @@ class ProxylineHttpForwardAgent extends http.Agent {
       };
       socket.once(this.#proxy.protocol === "https:" ? "secureConnect" : "connect", onConnected);
       socket.once("error", onError);
+      return undefined as unknown as net.Socket;
     }
     return socket;
   }

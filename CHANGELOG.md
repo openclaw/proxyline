@@ -2,6 +2,8 @@
 
 ## 0.3.6 - Unreleased
 
+- Fixed HTTP forwarding through HTTPS proxies to wait for the proxy TLS handshake before assigning the socket to Node's agent. Thanks @SebTardif.
+
 ## 0.3.5 - 2026-08-01
 
 - Fixed malformed percent-encoding in proxy credentials to fail through CONNECT promises and Node request errors with `INVALID_PROXY_USERINFO`. Thanks @SebTardif.
