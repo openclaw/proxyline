@@ -7,9 +7,29 @@ export type OpenProxyConnectTunnelOptions = Readonly<{
   proxyTls?: ProxylineTlsOptions;
   targetHost: string;
   targetPort: number;
+  /**
+   * Overall budget for the CONNECT handshake.
+   * Omit for the default (30s). Pass `0` (or a negative value) for no timeout.
+   */
   timeoutMs?: number;
   signal?: AbortSignal;
 }>;
+
+/** Default CONNECT handshake budget when `timeoutMs` is omitted. */
+const DEFAULT_PROXY_CONNECT_TIMEOUT_MS = 30_000;
+
+/**
+ * Resolve the CONNECT timeout to apply.
+ * - `undefined` → default 30s
+ * - `<= 0` → no timeout (unbounded)
+ * - positive → truncated milliseconds
+ */
+function resolveProxyConnectTimeoutMs(timeoutMs: number | undefined): number | undefined {
+  if (timeoutMs === undefined) {
+    return DEFAULT_PROXY_CONNECT_TIMEOUT_MS;
+  }
+  return timeoutMs > 0 ? Math.trunc(timeoutMs) : undefined;
+}
 
 const MAX_CONNECT_RESPONSE_HEADER_BYTES = 16 * 1024;
 const INVALID_CONNECT_AUTHORITY_PATTERN = /[\u0000-\u0020\u007f]/;
@@ -219,10 +239,11 @@ export async function openProxyConnectTunnel(
         onAbort();
         return;
       }
-      if (options.timeoutMs !== undefined && options.timeoutMs > 0) {
+      const connectTimeoutMs = resolveProxyConnectTimeoutMs(options.timeoutMs);
+      if (connectTimeoutMs !== undefined) {
         timeout = setTimeout(() => {
-          fail(new Error(`proxy CONNECT timed out after ${Math.trunc(options.timeoutMs ?? 0)}ms`));
-        }, Math.trunc(options.timeoutMs));
+          fail(new Error(`proxy CONNECT timed out after ${connectTimeoutMs}ms`));
+        }, connectTimeoutMs);
       }
       socket = connectToProxy(proxy, options.proxyTls);
       socket.once(proxy.protocol === "https:" ? "secureConnect" : "connect", onConnected);
