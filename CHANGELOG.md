@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.7 - Unreleased
+
 ## 0.3.6 - 2026-08-02
 
 - Fixed HTTP forwarding through HTTPS proxies to wait for the proxy TLS handshake before assigning the socket to Node's agent. Thanks @SebTardif.
