@@ -1626,6 +1626,40 @@ test("managed mode trusts an HTTPS proxy endpoint with scoped CA", async () => {
   }
 });
 
+test("managed node:http waits for the HTTPS proxy handshake before assigning its socket", async () => {
+  const lab = await startProxyLab({ secureProxy: true });
+  const proxyCa = lab.proxyCa;
+  assert.ok(proxyCa);
+  const proxy = installGlobalProxy({
+    mode: "managed",
+    proxyUrl: lab.proxyUrl,
+    proxyTls: { ca: proxyCa },
+  });
+  try {
+    let socketState: { authorized: boolean; connecting: boolean } | undefined;
+    await new Promise<void>((resolve, reject) => {
+      const req = http.get(`${lab.targetUrl}/allowed`, (res) => {
+        res.resume();
+        res.once("end", resolve);
+      });
+      req.once("socket", (socket) => {
+        const proxySocket = socket as tls.TLSSocket;
+        socketState = {
+          authorized: proxySocket.authorized,
+          connecting: proxySocket.connecting,
+        };
+      });
+      req.once("error", reject);
+    });
+
+    assert.deepEqual(socketState, { authorized: true, connecting: false });
+    assert.ok(lab.events.some((event) => event.type === "allow"));
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
 test("managed mode does not send IP-literal SNI to HTTPS proxy endpoints", async () => {
   const lab = await startProxyLab({ secureProxy: true, proxyHost: "127.0.0.1" });
   const proxyCa = lab.proxyCa;

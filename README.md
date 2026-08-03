@@ -1,133 +1,97 @@
-# 🌐 Proxyline
+# Proxyline 🌐 — Keep every Node request in line.
+
+[![CI](https://img.shields.io/github/actions/workflow/status/openclaw/proxyline/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/openclaw/proxyline/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/%40openclaw%2Fproxyline?style=flat-square)](https://www.npmjs.com/package/@openclaw/proxyline)
+[![Node.js](https://img.shields.io/node/v/%40openclaw%2Fproxyline?style=flat-square)](https://nodejs.org/)
+[![License](https://img.shields.io/github/license/openclaw/proxyline?style=flat-square)](./LICENSE)
 
 ![Proxyline banner](docs/assets/readme-banner.jpg)
 
-[![npm](https://img.shields.io/npm/v/%40openclaw%2Fproxyline.svg)](https://www.npmjs.com/package/@openclaw/proxyline)
-[![node](https://img.shields.io/node/v/%40openclaw%2Fproxyline.svg)](https://nodejs.org/)
-[![license](https://img.shields.io/npm/l/%40openclaw%2Fproxyline.svg)](./LICENSE)
+Proxyline installs one process-wide proxy policy across Node's built-in HTTP(S) clients, global fetch and Undici, compatible WebSocket clients, and explicit CONNECT tunnels. It is for Node applications that need one runtime to enforce proxy routing, explain its decisions, and restore the original networking globals.
 
-Process-global proxy routing for Node.js. One install replaces `node:http`, `node:https`, the undici/fetch global dispatcher, and provides WebSocket and explicit HTTP CONNECT helpers for the same policy.
-
-Proxyline exists to make proxy behavior **explicit, observable, and hard to bypass accidentally** — so that "all egress goes through this gateway" is something you encode in code rather than hope for from environment variables.
-
-Proxyline's runtime assurances assume it is installed before application and plugin networking code is loaded. Code that captured networking functions before installation, uses raw sockets, or owns a private/native transport stack is outside the normal Proxyline model.
-
-Website: [proxyline.dev](https://proxyline.dev)
-
-## Highlights
-
-- **Two modes.** `managed` forces traffic through a configured proxy and fails closed on bad config. `ambient` reads `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY` for tooling that needs environment compatibility.
-- **Covers the surfaces that matter.** `http.request`, `http.get`, `https.request`, `https.get`, both global agents, the undici global dispatcher, and helpers for WebSocket agents and HTTP CONNECT sockets.
-- **Replaces caller agents.** In managed mode and active ambient mode, a per-request `http.Agent` passed by a library does not bypass the proxy. TLS options on the caller agent (`ca`, `cert`, `key`, `rejectUnauthorized`, …) are preserved so destination TLS still validates.
-- **Intentional bypasses only.** Managed mode can accept a `bypassPolicy` callback, process-wide `registerBypass()`, or async-scoped `withBypass()` calls for trusted loopback or control-plane traffic that must stay direct; every bypass is visible through `explain()`.
-- **Embeddable runtime controls.** `ifActive` handles process singleton reuse/replacement, `undici` options tune dispatcher defaults, and `isProxylineDispatcher()` identifies Proxyline-owned dispatchers without constructor-name checks.
-- **Scoped proxy CA trust.** `proxyTls.ca` / `proxyTls.caFile` trust a private CA for the proxy endpoint only — no `NODE_EXTRA_CA_CERTS` and no `NODE_TLS_REJECT_UNAUTHORIZED=0`.
-- **Observable.** `proxy.explain(url)` returns a structured decision (`proxied` / `direct` with a `reason`), and an `onEvent` callback receives `runtime.installed`, `runtime.stopped`, and per-decision events. Proxy URLs are credential-redacted.
-- **Restoreable.** `proxy.stop()` restores the captured Node HTTP(S) methods, global agents, undici dispatcher, and fetch globals. The runtime is a process-wide singleton; by default a second active install throws `RUNTIME_ALREADY_ACTIVE`, while `ifActive` can reuse or replace intentionally.
+Documentation is available at [proxyline.dev](https://proxyline.dev).
 
 ## Install
 
-```bash
-pnpm add @openclaw/proxyline
-# or
-npm install @openclaw/proxyline
+```sh
+pnpm add @openclaw/proxyline undici@^8.5.0
 ```
 
-Requires Node 22.19.0+ and a host `undici` dependency compatible with `>=8.5.0 <9`.
+Or with npm:
+
+```sh
+npm install @openclaw/proxyline undici@^8.5.0
+```
+
+Proxyline requires Node.js 22.19.0 or newer and a host `undici` version in the `>=8.5.0 <9` range. The package is ESM-only and includes TypeScript declarations.
 
 ## Quick start
 
-### Managed mode
+Save this as `proxy.mjs`:
 
-```ts
+```js
 import { installGlobalProxy } from "@openclaw/proxyline";
 
 const proxy = installGlobalProxy({
   mode: "managed",
-  proxyUrl: "https://proxy.corp.example:8443",
-  proxyTls: { caFile: "/etc/proxy-ca.pem" },
-  onEvent: (event) => console.debug("[proxyline]", event),
+  proxyUrl: "http://127.0.0.1:3128",
 });
-
-console.log(proxy.explain("https://api.example.com/"));
+console.log(proxy.explain("https://api.example.com/").reason);
+proxy.stop();
 ```
 
-### Ambient mode
-
-```ts
-import { installGlobalProxy } from "@openclaw/proxyline";
-
-const proxy = installGlobalProxy({ mode: "ambient" });
-if (!proxy.active) {
-  console.warn("no HTTP_PROXY/HTTPS_PROXY/ALL_PROXY set — egress will be direct");
-}
+```sh
+node proxy.mjs
+# managed-proxy-active
 ```
 
-### WebSocket
+This asks Proxyline for a routing decision without connecting to the placeholder proxy. Install Proxyline before loading application or plugin code that may capture networking functions.
 
-```ts
-import WebSocket from "ws";
+## Choose a mode
 
-const socket = new WebSocket("wss://events.example.com/", {
-  agent: proxy.createWebSocketAgent(),
-});
-```
+Proxyline has two explicit routing modes:
 
-### Explicit HTTP CONNECT
+| Mode | Configuration | Direct traffic |
+| --- | --- | --- |
+| `managed` | A required `proxyUrl` in code | Only through `bypassPolicy`, `registerBypass()`, or `withBypass()` |
+| `ambient` | `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and `NO_PROXY` | Whenever the environment has no matching proxy |
 
-```ts
-import { openProxyConnectTunnel } from "@openclaw/proxyline";
+Managed mode fails during setup when its proxy configuration is missing or unsupported. Ambient mode reads the environment once at installation and stays inactive when no supported HTTP or HTTPS proxy is configured. See [Modes](./docs/modes.md) and [Environment Variables](./docs/environment-variables.md) for the complete rules.
 
-const controller = new AbortController();
-const socket = await openProxyConnectTunnel({
-  proxyUrl: "https://proxy.corp.example:8443",
-  proxyTls: { caFile: "/etc/proxy-ca.pem" },
-  targetHost: "api.example.com",
-  targetPort: 443,
-  timeoutMs: 2_000,
-  signal: controller.signal,
-});
-```
+## Covered traffic
 
-### Conditional Node agent
+| Surface | How Proxyline applies the policy |
+| --- | --- |
+| `node:http` and `node:https` | Patches request methods and replaces global and caller-supplied agents |
+| Global fetch and Undici | Installs a global dispatcher and a compatible fetch stack |
+| WebSocket clients | Supplies `proxy.createWebSocketAgent()` for clients that accept a Node agent |
+| Explicit tunnels | Supplies `openProxyConnectTunnel()` for callers that need the connected socket |
 
-```ts
-import { createAmbientNodeProxyAgent } from "@openclaw/proxyline";
+`proxy.createNodeAgent()` and `proxy.createUndiciDispatcher()` expose the same policy to libraries that accept an agent or dispatcher directly. The [surface guide](./docs/surfaces.md) describes ownership, TLS preservation, and cleanup for each API.
 
-const agent = createAmbientNodeProxyAgent({
-  protocol: "https",
-  proxyTls: { caFile: "/etc/proxy-ca.pem" },
-});
-```
+## Bypasses and proxy trust
 
-The helper returns `undefined` when ambient proxy env is not configured, so callers can pass an agent only when needed.
-It uses Proxyline's built-in HTTP/HTTPS Node agent, and `proxyTls` applies only to HTTPS proxy endpoints. SOCKS and PAC proxy schemes remain unsupported.
+Managed mode supports deliberate direct-routing exceptions. A `bypassPolicy` handles installation-time policy, `registerBypass()` registers an exact process-wide exception, and `withBypass()` limits an exception to one async context. Each decision remains visible through `explain()`.
 
-## Product coverage
+For an HTTPS proxy with a private CA, use `proxyTls.ca` or `proxyTls.caFile`. That trust applies only to the proxy connection; destination TLS validation remains separate. See [Proxy TLS](./docs/proxy-tls.md).
 
-- `http.request` / `http.get`: covered by global method patching and global agent replacement.
-- `https.request` / `https.get`: covered by global method patching and global agent replacement.
-- `globalThis.fetch`: covered by the fetch patch, including explicit dispatcher options and later Undici global dispatcher replacement in managed mode.
-- Undici global dispatcher: installed for Undici APIs that read the current process dispatcher.
-- WebSocket clients accepting a Node `agent`: covered with `proxy.createWebSocketAgent()`.
-- Caller-built `http.Agent` / `https.Agent`: overridden in managed and active ambient mode, with TLS options preserved.
-- Explicit HTTP CONNECT sockets: covered with `openProxyConnectTunnel()`.
-- Raw `net.connect` / `tls.connect`: out of scope; see [Security](./docs/security.md).
-- Native or private transport stacks: out of scope; see [Security](./docs/security.md).
+## Observability and lifecycle
 
-## Why not just env vars?
+`proxy.explain(url)` reports `proxied` or `direct`, the reason, the surface, and a credential-redacted proxy URL when one applies. The optional `onEvent` callback receives installation, shutdown, and decision events.
 
-Environment-based proxies are best-effort. A missing variable, a stale shell, a `NO_PROXY` typo, or a library that built its own `Dispatcher` quietly turns "always through the proxy" into "sometimes direct." Proxyline encodes the policy in code, replaces caller-built agents, and exposes a structured decision so logs can prove every request went the right way.
+Only one Proxyline runtime is active in a process. A second installation fails by default; `ifActive` can reuse a compatible runtime or replace it intentionally. `proxy.stop()` restores the captured Node HTTP(S) methods, global agents, Undici dispatcher, and fetch globals. See [Observability](./docs/observability.md) and the [API Reference](./docs/api-reference.md).
 
-For tooling that *should* honor whatever the operator configured, ambient mode keeps the conventional behavior — with the same observability and the same credential redaction.
+## Security boundary
+
+Proxyline is a Node-process runtime, not an operating-system sandbox. Raw `net` or `tls` sockets, native or private transport stacks, networking functions captured before installation, and DNS traffic are outside its boundary. Combine it with operating-system egress controls when code in the process is not trusted.
+
+Read the [security model](./docs/security.md) before treating managed mode as an enforcement boundary.
 
 ## Documentation
 
-Full docs live in [`docs/`](./docs/README.md):
-
 - [Getting Started](./docs/getting-started.md)
-- [Modes](./docs/modes.md) — managed vs ambient
-- [Surfaces](./docs/surfaces.md) — per-API behavior
+- [Modes](./docs/modes.md)
+- [Surfaces](./docs/surfaces.md)
 - [API Reference](./docs/api-reference.md)
 - [Environment Variables](./docs/environment-variables.md)
 - [Proxy TLS](./docs/proxy-tls.md)
@@ -136,9 +100,14 @@ Full docs live in [`docs/`](./docs/README.md):
 - [Troubleshooting](./docs/troubleshooting.md)
 - [Testing](./docs/testing.md)
 
-## Limits
+## Development
 
-Proxyline is a Node-process runtime, not an operating-system sandbox. Code can still bypass it by using raw `net`, raw `tls`, custom native networking, or a library that owns a private transport stack. Anything that captured `http.request` or `https.request` before Proxyline installed also bypasses it — install before loading third-party integrations when proxy routing is a security policy. See [`docs/security.md`](./docs/security.md) for the full threat model.
+```sh
+pnpm install --frozen-lockfile
+pnpm check
+pnpm test
+pnpm docs:build
+```
 
 ## License
 
