@@ -2,8 +2,6 @@
 
 ## 0.3.7 - Unreleased
 
-- Default HTTP/HTTPS agent CONNECT handshakes to a 30s timeout when request timeout is omitted (same as `openProxyConnectTunnel`). Pass timeout 0 for unbounded. Thanks @SebTardif.
-
 ## 0.3.6 - 2026-08-02
 
 - Fixed HTTP forwarding through HTTPS proxies to wait for the proxy TLS handshake before assigning the socket to Node's agent. Thanks @SebTardif.
