@@ -2,6 +2,9 @@
 
 ## 0.3.7 - Unreleased
 
+- Fixed Node HTTP/HTTPS proxy agents to apply the default 30-second CONNECT timeout when callers omit a request timeout; explicit `0` remains unbounded. Thanks @SebTardif.
+- Updated Undici and tsx, pnpm and npm release tooling, and pinned GitHub Actions to their latest stable releases.
+
 ## 0.3.6 - 2026-08-02
 
 - Fixed HTTP forwarding through HTTPS proxies to wait for the proxy TLS handshake before assigning the socket to Node's agent. Thanks @SebTardif.
