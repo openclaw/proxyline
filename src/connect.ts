@@ -16,7 +16,7 @@ export type OpenProxyConnectTunnelOptions = Readonly<{
 }>;
 
 /** Default CONNECT handshake budget when `timeoutMs` is omitted. */
-const DEFAULT_PROXY_CONNECT_TIMEOUT_MS = 30_000;
+export const DEFAULT_PROXY_CONNECT_TIMEOUT_MS = 30_000;
 
 /**
  * Resolve the CONNECT timeout to apply.
@@ -24,7 +24,7 @@ const DEFAULT_PROXY_CONNECT_TIMEOUT_MS = 30_000;
  * - `<= 0` → no timeout (unbounded)
  * - positive → truncated milliseconds
  */
-function resolveProxyConnectTimeoutMs(timeoutMs: number | undefined): number | undefined {
+export function resolveProxyConnectTimeoutMs(timeoutMs: number | undefined): number | undefined {
   if (timeoutMs === undefined) {
     return DEFAULT_PROXY_CONNECT_TIMEOUT_MS;
   }

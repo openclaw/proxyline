@@ -8,7 +8,7 @@ import {
   resolveAmbientProxyForUrl,
   type ProxyEnvSnapshot,
 } from "./env.js";
-import { formatConnectAuthority } from "./connect.js";
+import { formatConnectAuthority, resolveProxyConnectTimeoutMs } from "./connect.js";
 import { ProxylineError, decodeProxyUserinfoComponent, resolveProxyTlsCa, type ProxylineTlsOptions } from "./shared.js";
 import type { ProxylineSurface, ProxyResolver } from "./types.js";
 
@@ -699,10 +699,21 @@ class ProxylineConnectAgent extends http.Agent {
       request.setTimeout = hookedRequestSetTimeout;
     }
 
+    // Prefer explicit agent/request timeout. Default 30s only when both are omitted.
+    // Explicit values go through normalizedPositiveInteger first so fractional/invalid
+    // timeouts keep the historical no-pending-timer behavior (not Math.trunc to 1ms).
     const requestTimeout = (request as { timeout?: unknown } | undefined)?.timeout;
-    const timeoutMs = normalizedPositiveInteger(options.timeout ?? requestTimeout);
-    if (timeoutMs !== undefined) {
-      startPendingTimeout(timeoutMs);
+    const rawTimeout = options.timeout !== undefined ? options.timeout : requestTimeout;
+    if (rawTimeout === undefined) {
+      const connectTimeoutMs = resolveProxyConnectTimeoutMs(undefined);
+      if (connectTimeoutMs !== undefined) {
+        startPendingTimeout(connectTimeoutMs);
+      }
+    } else {
+      const timeoutMs = normalizedPositiveInteger(rawTimeout);
+      if (timeoutMs !== undefined) {
+        startPendingTimeout(timeoutMs);
+      }
     }
     request?.once("abort", onRequestClosed);
     request?.once("close", onRequestClosed);
