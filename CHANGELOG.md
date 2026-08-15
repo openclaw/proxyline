@@ -2,6 +2,9 @@
 
 ## 0.3.8 - Unreleased
 
+- Fixed Node HTTP-forward agents to destroy pending proxy sockets when the agent is destroyed. Thanks @SebTardif.
+- Fixed runtime install so a throwing `onEvent` observer cannot orphan patched globals; the returned handle remains stoppable and replaceable. Thanks @SebTardif.
+
 ## 0.3.7 - 2026-08-02
 
 - Fixed Node HTTP/HTTPS proxy agents to apply the default 30-second CONNECT timeout when callers omit a request timeout; explicit `0` remains unbounded. Thanks @SebTardif.

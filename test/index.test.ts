@@ -344,6 +344,34 @@ test("managed mode reuses compatible active runtime and replaces on request", ()
   }
 });
 
+test("throwing onEvent still yields a stoppable handle and allows replace", () => {
+  const handle = installGlobalProxy({
+    mode: "managed",
+    proxyUrl: "https://proxy.example:8443",
+    onEvent: (event) => {
+      if (event.type === "runtime.installed") {
+        throw new Error("observer failed");
+      }
+    },
+  });
+
+  try {
+    assert.equal(handle.active, true);
+    assert.equal(typeof handle.stop, "function");
+
+    const replacement = installGlobalProxy({
+      mode: "managed",
+      proxyUrl: "https://replacement.example:8443",
+      ifActive: "replace",
+    });
+    assert.notEqual(replacement, handle);
+    assert.equal(replacement.proxyUrl, "https://replacement.example:8443/");
+    replacement.stop();
+  } finally {
+    handle.stop();
+  }
+});
+
 test("ambient mode rejects compatible reuse when env snapshot changes", () => {
   withProxyEnv({ HTTP_PROXY: "http://old-proxy.example:8080" }, () => {
     const proxy = installGlobalProxy({ mode: "ambient" });

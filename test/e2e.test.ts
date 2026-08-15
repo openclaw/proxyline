@@ -781,6 +781,46 @@ test("node CONNECT agent destroys pending proxy sockets when the agent is destro
   });
 });
 
+test("node HTTP-forward agent destroys pending proxy sockets when the agent is destroyed", async () => {
+  const netMutable = net as unknown as { connect: (...args: unknown[]) => net.Socket };
+  const originalNetConnect = netMutable.connect;
+  const pendingSockets: FakeProxySocket[] = [];
+  const resolver: ProxyResolver = {
+    active: true,
+    describeProxy: () => "http://proxy.example:8080/",
+    explain: () => {
+      throw new Error("not used");
+    },
+    getProxyForUrl: () => "http://proxy.example:8080/",
+  };
+  const agent = createNodeProxyAgent(resolver, undefined, "http");
+  try {
+    netMutable.connect = () => {
+      const proxySocket = new FakeProxySocket();
+      pendingSockets.push(proxySocket);
+      return proxySocket as unknown as net.Socket;
+    };
+
+    const req = http.get("http://example.test/allowed", { agent }, () => {});
+    try {
+      for (let attempt = 0; attempt < 20 && pendingSockets.length === 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.equal(pendingSockets.length, 1);
+      assert.equal(pendingSockets[0]?.destroyed, false);
+
+      agent.destroy();
+
+      assert.equal(pendingSockets[0]?.destroyed, true);
+    } finally {
+      req.destroy();
+    }
+  } finally {
+    netMutable.connect = originalNetConnect;
+    agent.destroy();
+  }
+});
+
 test("node CONNECT agent fails requests when destination TLS closes during handshake", async () => {
   const netMutable = net as unknown as { connect: (...args: unknown[]) => net.Socket };
   const tlsMutable = tls as unknown as { connect: (...args: unknown[]) => tls.TLSSocket };

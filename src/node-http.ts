@@ -420,6 +420,7 @@ function destinationTlsConnectOptions(
 class ProxylineHttpForwardAgent extends http.Agent {
   public readonly options: NodeAgentOptions;
   readonly #keepAlive: boolean;
+  readonly #pendingConnectSockets = new Set<net.Socket>();
   readonly #proxy: URL;
   readonly #proxyTls: ProxylineTlsOptions | undefined;
 
@@ -446,11 +447,14 @@ class ProxylineHttpForwardAgent extends http.Agent {
     // path. Returning the same socket as well double-invokes Agent setup and can
     // hand an unready TLS proxy socket to plain HTTP forward traffic.
     if (callback !== undefined) {
+      this.#pendingConnectSockets.add(socket);
       const onError = (error: Error): void => {
+        this.#pendingConnectSockets.delete(socket);
         callback(error, socket);
       };
       const onConnected = (): void => {
         socket.off("error", onError);
+        this.#pendingConnectSockets.delete(socket);
         callback(null, socket);
       };
       socket.once(this.#proxy.protocol === "https:" ? "secureConnect" : "connect", onConnected);
@@ -458,6 +462,14 @@ class ProxylineHttpForwardAgent extends http.Agent {
       return undefined as unknown as net.Socket;
     }
     return socket;
+  }
+
+  public override destroy(): void {
+    for (const socket of this.#pendingConnectSockets) {
+      socket.destroy();
+    }
+    this.#pendingConnectSockets.clear();
+    super.destroy();
   }
 }
 
