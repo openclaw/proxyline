@@ -283,7 +283,11 @@ function normalizeProxyUrl(value: string | URL | undefined): URL | undefined {
 }
 
 function emit(onEvent: ProxylineOptions["onEvent"], event: ProxylineEvent): void {
-  onEvent?.(event);
+  try {
+    onEvent?.(event);
+  } catch {
+    // Observer failures must not fail install or leave patched globals unstoppable.
+  }
 }
 
 function isProxyableUrlProtocol(protocol: string): boolean {
@@ -942,12 +946,6 @@ export function installProxyline(options: ProxylineOptions): ProxylineHandle {
         },
       )
     : undefined;
-  emit(options.onEvent, {
-    type: "runtime.installed",
-    mode: options.mode,
-    active: hasActiveProxy,
-    ...(redactedProxyUrl ? { proxyUrl: redactedProxyUrl } : {}),
-  });
 
   const handle: ProxylineHandle = {
     mode: options.mode,
@@ -1012,6 +1010,12 @@ export function installProxyline(options: ProxylineOptions): ProxylineHandle {
   };
 
   activeHandle = hasActiveProxy ? handle : activeHandle;
+  emit(options.onEvent, {
+    type: "runtime.installed",
+    mode: options.mode,
+    active: hasActiveProxy,
+    ...(redactedProxyUrl ? { proxyUrl: redactedProxyUrl } : {}),
+  });
   return handle;
 }
 

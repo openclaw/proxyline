@@ -196,6 +196,36 @@ async function withStalledConnectProxy<T>(
   }
 }
 
+async function withStalledTlsProxy<T>(
+  run: (proxyUrl: string, activeSockets: Set<net.Socket>) => Promise<T>,
+): Promise<T> {
+  const activeSockets = new Set<net.Socket>();
+  const proxyServer = net.createServer((socket) => {
+    activeSockets.add(socket);
+    socket.once("close", () => activeSockets.delete(socket));
+    socket.resume();
+  });
+  proxyServer.listen(0, "127.0.0.1");
+  await once(proxyServer, "listening");
+  const address = proxyServer.address() as AddressInfo;
+  try {
+    return await run(`https://127.0.0.1:${address.port}`, activeSockets);
+  } finally {
+    for (const socket of activeSockets) {
+      socket.destroy();
+    }
+    await new Promise<void>((resolve, reject) => {
+      proxyServer.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+  }
+}
+
 class FakeProxySocket extends Duplex {
   public override _read(): void {}
 
@@ -774,6 +804,45 @@ test("node CONNECT agent destroys pending proxy sockets when the agent is destro
       }
       assert.equal(activeSockets.size, 0);
       await requestClosed;
+    } finally {
+      req.destroy();
+      agent.destroy();
+    }
+  });
+});
+
+test("node HTTP-forward agent destroys pending proxy sockets when the agent is destroyed", async () => {
+  await withStalledTlsProxy(async (proxyUrl, activeSockets) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
+    };
+    const agent = createNodeProxyAgent(resolver, undefined, "http");
+    const req = http.get("http://example.test/allowed", { agent }, () => {});
+    const requestError = once(req, "error").then(([error]) => error as Error);
+    try {
+      for (let attempt = 0; attempt < 20 && activeSockets.size === 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.equal(activeSockets.size, 1);
+
+      agent.destroy();
+
+      const error = await Promise.race([
+        requestError,
+        new Promise<never>((_resolve, reject) => {
+          setTimeout(() => reject(new Error("request remained pending after agent destroy")), 500);
+        }),
+      ]);
+      assert.match(error.message, /agent was destroyed/);
+      for (let attempt = 0; attempt < 80 && activeSockets.size > 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.equal(activeSockets.size, 0);
     } finally {
       req.destroy();
       agent.destroy();
