@@ -196,6 +196,36 @@ async function withStalledConnectProxy<T>(
   }
 }
 
+async function withStalledTlsProxy<T>(
+  run: (proxyUrl: string, activeSockets: Set<net.Socket>) => Promise<T>,
+): Promise<T> {
+  const activeSockets = new Set<net.Socket>();
+  const proxyServer = net.createServer((socket) => {
+    activeSockets.add(socket);
+    socket.once("close", () => activeSockets.delete(socket));
+    socket.resume();
+  });
+  proxyServer.listen(0, "127.0.0.1");
+  await once(proxyServer, "listening");
+  const address = proxyServer.address() as AddressInfo;
+  try {
+    return await run(`https://127.0.0.1:${address.port}`, activeSockets);
+  } finally {
+    for (const socket of activeSockets) {
+      socket.destroy();
+    }
+    await new Promise<void>((resolve, reject) => {
+      proxyServer.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+  }
+}
+
 class FakeProxySocket extends Duplex {
   public override _read(): void {}
 
@@ -782,43 +812,42 @@ test("node CONNECT agent destroys pending proxy sockets when the agent is destro
 });
 
 test("node HTTP-forward agent destroys pending proxy sockets when the agent is destroyed", async () => {
-  const netMutable = net as unknown as { connect: (...args: unknown[]) => net.Socket };
-  const originalNetConnect = netMutable.connect;
-  const pendingSockets: FakeProxySocket[] = [];
-  const resolver: ProxyResolver = {
-    active: true,
-    describeProxy: () => "http://proxy.example:8080/",
-    explain: () => {
-      throw new Error("not used");
-    },
-    getProxyForUrl: () => "http://proxy.example:8080/",
-  };
-  const agent = createNodeProxyAgent(resolver, undefined, "http");
-  try {
-    netMutable.connect = () => {
-      const proxySocket = new FakeProxySocket();
-      pendingSockets.push(proxySocket);
-      return proxySocket as unknown as net.Socket;
+  await withStalledTlsProxy(async (proxyUrl, activeSockets) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
     };
-
+    const agent = createNodeProxyAgent(resolver, undefined, "http");
     const req = http.get("http://example.test/allowed", { agent }, () => {});
+    const requestError = once(req, "error").then(([error]) => error as Error);
     try {
-      for (let attempt = 0; attempt < 20 && pendingSockets.length === 0; attempt += 1) {
+      for (let attempt = 0; attempt < 20 && activeSockets.size === 0; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
-      assert.equal(pendingSockets.length, 1);
-      assert.equal(pendingSockets[0]?.destroyed, false);
+      assert.equal(activeSockets.size, 1);
 
       agent.destroy();
 
-      assert.equal(pendingSockets[0]?.destroyed, true);
+      const error = await Promise.race([
+        requestError,
+        new Promise<never>((_resolve, reject) => {
+          setTimeout(() => reject(new Error("request remained pending after agent destroy")), 500);
+        }),
+      ]);
+      assert.match(error.message, /agent was destroyed/);
+      for (let attempt = 0; attempt < 80 && activeSockets.size > 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.equal(activeSockets.size, 0);
     } finally {
       req.destroy();
+      agent.destroy();
     }
-  } finally {
-    netMutable.connect = originalNetConnect;
-    agent.destroy();
-  }
+  });
 });
 
 test("node CONNECT agent fails requests when destination TLS closes during handshake", async () => {

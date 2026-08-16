@@ -448,17 +448,33 @@ class ProxylineHttpForwardAgent extends http.Agent {
     // hand an unready TLS proxy socket to plain HTTP forward traffic.
     if (callback !== undefined) {
       this.#pendingConnectSockets.add(socket);
-      const onError = (error: Error): void => {
+      let settled = false;
+      const cleanup = (): void => {
         this.#pendingConnectSockets.delete(socket);
+        socket.off(this.#proxy.protocol === "https:" ? "secureConnect" : "connect", onConnected);
+        socket.off("error", onError);
+        socket.off("close", onClosed);
+      };
+      const finish = (error: Error | null): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
         callback(error, socket);
       };
+      const onError = (error: Error): void => {
+        finish(error);
+      };
+      const onClosed = (): void => {
+        finish(new ProxylineError("CONNECT_FAILED", "proxy socket closed before connection completed"));
+      };
       const onConnected = (): void => {
-        socket.off("error", onError);
-        this.#pendingConnectSockets.delete(socket);
-        callback(null, socket);
+        finish(null);
       };
       socket.once(this.#proxy.protocol === "https:" ? "secureConnect" : "connect", onConnected);
       socket.once("error", onError);
+      socket.once("close", onClosed);
       return undefined as unknown as net.Socket;
     }
     return socket;
@@ -466,7 +482,7 @@ class ProxylineHttpForwardAgent extends http.Agent {
 
   public override destroy(): void {
     for (const socket of this.#pendingConnectSockets) {
-      socket.destroy();
+      socket.destroy(new ProxylineError("CONNECT_FAILED", "proxy connection failed because agent was destroyed"));
     }
     this.#pendingConnectSockets.clear();
     super.destroy();
