@@ -697,6 +697,24 @@ test("ambient mode suffix no-proxy entries also match the root host", () => {
   }
 });
 
+test("ambient mode handles dot-heavy nonmatching no-proxy entries", () => {
+  const proxy = withProxyEnv(
+    {
+      HTTP_PROXY: "http://proxy.example:8080",
+      NO_PROXY: `${".".repeat(4_096)}not-a-host`,
+    },
+    () => installProxyline({ mode: "ambient" }),
+  );
+  try {
+    const decision = proxy.explain("http://corp.example/");
+
+    assert.equal(decision.kind, "proxied");
+    assert.equal(decision.proxyUrl, "http://proxy.example:8080/");
+  } finally {
+    proxy.stop();
+  }
+});
+
 test("redactProxyUrl removes credentials, search, and hash", () => {
   assert.equal(
     redactProxyUrl("https://user:secret@proxy.example:8443/path?q=1#frag"),

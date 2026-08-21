@@ -99,16 +99,6 @@ function closeServer(server: LabServer): Promise<void> {
   });
 }
 
-function isLoopbackHost(hostname: string): boolean {
-  const normalized = hostname.trim().toLowerCase().replace(/\.+$/, "");
-  return (
-    normalized === "localhost" ||
-    normalized === "127.0.0.1" ||
-    normalized === "[::1]" ||
-    normalized === "::1"
-  );
-}
-
 export async function startProxyLab(options: ProxyLabOptions = {}): Promise<ProxyLab> {
   const events: ProxyLabEvent[] = [];
   const denyPaths = new Set(["/denied"]);
@@ -214,22 +204,25 @@ export async function startProxyLab(options: ProxyLabOptions = {}): Promise<Prox
       return;
     }
 
-    if (isLoopbackHost(targetUrl.hostname) && !allowLoopbackAuthorities.has(targetUrl.host)) {
+    if (targetUrl.protocol !== "http:" || !allowLoopbackAuthorities.has(targetUrl.host)) {
       clientReq.resume();
       clientRes.writeHead(403, { "content-type": "text/plain" });
-      clientRes.end("loopback blocked by proxy lab\n");
+      clientRes.end("blocked by proxy lab\n");
       events.push({ type: "deny", status: 403, url: targetUrl.toString() });
       return;
     }
 
     const upstreamReq = originalHttpRequest(
-      targetUrl,
       {
+        protocol: "http:",
+        hostname: targetHost,
+        port: targetAddress.port,
+        path: `${targetUrl.pathname}${targetUrl.search}`,
         method: clientReq.method,
         agent: upstreamDirectAgent,
         headers: {
           ...clientReq.headers,
-          host: targetUrl.host,
+          host: targetAuthority,
         },
       },
       (upstreamRes) => {
@@ -276,7 +269,7 @@ export async function startProxyLab(options: ProxyLabOptions = {}): Promise<Prox
       return;
     }
 
-    if (isLoopbackHost(targetHost) && !allowLoopbackAuthorities.has(authority)) {
+    if (!allowLoopbackAuthorities.has(authority)) {
       clientSocket.end("HTTP/1.1 403 Forbidden\r\n\r\n");
       events.push({ type: "deny_connect", status: 403, authority, path: "<authority>" });
       return;
