@@ -422,16 +422,31 @@ function tocFromHtml(html) {
   const re = /<h([23]) id="([^"]+)">([\s\S]*?)<\/h[23]>/g;
   let m;
   while ((m = re.exec(html))) {
-    const text = m[3]
-      .replace(/<a class="anchor"[^>]*>.*?<\/a>/, "")
-      .replace(/<[^>]+>/g, "")
-      .trim();
+    let text = stripHtmlTags(m[3]).trim();
+    if (text.startsWith("#")) {
+      text = text.slice(1).trimStart();
+    }
     items.push({ level: Number(m[1]), id: m[2], text });
   }
   if (items.length < 2) return "";
   return `<nav class="toc" aria-label="On this page"><h2>On this page</h2>${items
     .map((i) => `<a class="toc-l${i.level}" href="#${i.id}">${escapeHtml(i.text)}</a>`)
     .join("")}</nav>`;
+}
+
+function stripHtmlTags(value) {
+  let text = "";
+  let insideTag = false;
+  for (const char of value) {
+    if (char === "<") {
+      insideTag = true;
+    } else if (char === ">") {
+      insideTag = false;
+    } else if (!insideTag) {
+      text += char;
+    }
+  }
+  return text;
 }
 
 function isHomePage(page) {

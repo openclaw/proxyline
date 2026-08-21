@@ -1465,6 +1465,32 @@ test("managed mode routes node:http through the lab proxy and denies blocked pat
   }
 });
 
+test("proxy lab refuses HTTP and CONNECT requests outside its registered targets", async () => {
+  const lab = await startProxyLab();
+  const proxy = installGlobalProxy({ mode: "managed", proxyUrl: lab.proxyUrl });
+  try {
+    const denied = await readHttp("http://example.test/allowed");
+    await assert.rejects(readHttps("https://example.test/allowed"));
+
+    assert.equal(denied.status, 403);
+    assert.match(denied.body, /blocked by proxy lab/);
+    assert.ok(
+      lab.events.some(
+        (event) => event.type === "deny" && event.url === "http://example.test/allowed",
+      ),
+    );
+    assert.ok(
+      lab.events.some(
+        (event) =>
+          event.type === "deny_connect" && event.authority === "example.test:443",
+      ),
+    );
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
 test("managed mode overrides a caller-provided direct node:http agent", async () => {
   const lab = await startProxyLab();
   const proxy = installGlobalProxy({ mode: "managed", proxyUrl: lab.proxyUrl });
@@ -1832,10 +1858,12 @@ test("managed mode does not send IPv6-literal SNI to HTTPS proxy endpoints", asy
   }
 });
 
-test("managed mode keeps destination TLS options from weakening HTTPS proxy TLS", async () => {
+test("managed mode does not reuse the destination CA for HTTPS proxy TLS", async () => {
   const lab = await startProxyLab({ secureProxy: true, secureTarget: true });
+  const targetCa = lab.targetCa;
+  assert.ok(targetCa);
   const proxy = installGlobalProxy({ mode: "managed", proxyUrl: lab.proxyUrl });
-  const callerAgent = new https.Agent({ rejectUnauthorized: false });
+  const callerAgent = new https.Agent({ ca: targetCa });
   try {
     await assert.rejects(
       readHttps(`${lab.targetUrl}/allowed`, { agent: callerAgent }),

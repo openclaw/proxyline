@@ -75,6 +75,44 @@ test("docs builder rejects duplicate output paths", () => {
   assert.match(result.stderr, /Duplicate docs output path "index\.html"/);
 });
 
+test("docs builder removes generated heading markup without reviving tags", () => {
+  const fixture = createDocsFixture();
+  fs.writeFileSync(
+    path.join(fixture, "docs", "README.md"),
+    [
+      "---",
+      "title: Home",
+      "permalink: /",
+      "---",
+      "",
+      "# Home",
+      "",
+    ].join("\n"),
+  );
+  fs.writeFileSync(
+    path.join(fixture, "docs", "getting-started.md"),
+    [
+      "# Getting Started",
+      "",
+      "## **First** heading",
+      "",
+      "## Literal `<scr<script>ipt>` heading",
+      "",
+    ].join("\n"),
+  );
+
+  const result = runDocsBuild(fixture);
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const html = fs.readFileSync(
+    path.join(fixture, "dist", "docs-site", "getting-started.html"),
+    "utf8",
+  );
+  assert.match(html, /class="toc-l2"[^>]*>First heading<\/a>/);
+  assert.doesNotMatch(html, /class="toc-l2"[^>]*><strong>/);
+  assert.doesNotMatch(html, /<script>ipt/);
+});
+
 test("prepack build does not install or rewrite dependencies", () => {
   const script = fs.readFileSync(path.join(repoRoot, "scripts", "prepack-build.mjs"), "utf8");
 

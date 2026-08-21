@@ -134,7 +134,12 @@ function matchesNoProxy(url: URL, env: ProxyEnvSnapshot): boolean {
 }
 
 function normalizeNoProxyHost(hostname: string): string {
-  const normalized = hostname.trim().toLowerCase().replace(/\.+$/, "");
+  const value = hostname.trim().toLowerCase();
+  let end = value.length;
+  while (end > 0 && value[end - 1] === ".") {
+    end -= 1;
+  }
+  const normalized = value.slice(0, end);
   return normalized.startsWith("[") && normalized.endsWith("]")
     ? normalized.slice(1, -1)
     : normalized;
