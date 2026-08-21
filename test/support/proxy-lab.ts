@@ -204,7 +204,7 @@ export async function startProxyLab(options: ProxyLabOptions = {}): Promise<Prox
       return;
     }
 
-    if (targetUrl.protocol !== "http:" || targetUrl.host !== targetAuthority) {
+    if (targetUrl.protocol !== "http:" || !allowLoopbackAuthorities.has(targetUrl.host)) {
       clientReq.resume();
       clientRes.writeHead(403, { "content-type": "text/plain" });
       clientRes.end("blocked by proxy lab\n");

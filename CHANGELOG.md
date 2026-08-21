@@ -1,9 +1,5 @@
 # Changelog
 
-## 0.3.8 - Unreleased
-
-- Hardened ambient `NO_PROXY` normalization, the local proxy test harness, TLS-isolation coverage, and generated documentation sanitization.
-
 ## 0.3.7 - 2026-08-02
 
 - Fixed Node HTTP/HTTPS proxy agents to apply the default 30-second CONNECT timeout when callers omit a request timeout; explicit `0` remains unbounded. Thanks @SebTardif.

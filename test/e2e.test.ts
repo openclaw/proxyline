@@ -1465,13 +1465,23 @@ test("managed mode routes node:http through the lab proxy and denies blocked pat
   }
 });
 
-test("proxy lab refuses HTTP and CONNECT requests outside its registered targets", async () => {
+test("proxy lab allows registered HTTP authorities and refuses unregistered targets", async () => {
   const lab = await startProxyLab();
+  const targetUrl = new URL(lab.targetUrl);
+  const targetAliasUrl = `http://localhost:${targetUrl.port}/allowed`;
   const proxy = installGlobalProxy({ mode: "managed", proxyUrl: lab.proxyUrl });
   try {
+    const allowed = await readHttp(targetAliasUrl);
     const denied = await readHttp("http://example.test/allowed");
     await assert.rejects(readHttps("https://example.test/allowed"));
 
+    assert.equal(allowed.status, 200);
+    assert.equal(allowed.body, "allowed via target\n");
+    assert.ok(
+      lab.events.some(
+        (event) => event.type === "allow" && event.url === targetAliasUrl,
+      ),
+    );
     assert.equal(denied.status, 403);
     assert.match(denied.body, /blocked by proxy lab/);
     assert.ok(
