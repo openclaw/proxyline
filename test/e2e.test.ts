@@ -850,6 +850,147 @@ test("node HTTP-forward agent destroys pending proxy sockets when the agent is d
   });
 });
 
+test("node HTTP-forward agent defaults omitted timeout to 30 seconds", async (t) => {
+  const originalSetTimeout = globalThis.setTimeout;
+  const observedTimeouts: number[] = [];
+  t.mock.method(
+    globalThis,
+    "setTimeout",
+    ((callback: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => {
+      observedTimeouts.push(delay ?? 0);
+      return originalSetTimeout(callback, delay === 30_000 ? 20 : delay, ...args);
+    }) as typeof setTimeout,
+  );
+
+  await withStalledTlsProxy(async (proxyUrl) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
+    };
+    const agent = createNodeProxyAgent(resolver, undefined, "http");
+    try {
+      await assert.rejects(
+        new Promise<void>((resolve, reject) => {
+          const req = http.get("http://example.test/allowed", { agent }, () => {
+            resolve();
+          });
+          req.on("error", reject);
+        }),
+        /timed out/,
+      );
+    } finally {
+      agent.destroy();
+    }
+  });
+  assert.ok(
+    observedTimeouts.includes(30_000),
+    `expected a 30s HTTP-forward connect timeout, got ${JSON.stringify(observedTimeouts)}`,
+  );
+});
+
+test("node HTTP-forward agent times out stalled proxy handshakes", async () => {
+  await withStalledTlsProxy(async (proxyUrl, activeSockets) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
+    };
+    const agent = createNodeProxyAgent(resolver, undefined, "http");
+    try {
+      await assert.rejects(
+        new Promise<void>((resolve, reject) => {
+          const req = http.get("http://example.test/allowed", { agent, timeout: 50 }, () => {
+            resolve();
+          });
+          req.on("error", reject);
+        }),
+        /timed out/,
+      );
+      for (let attempt = 0; attempt < 20 && activeSockets.size > 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.equal(activeSockets.size, 0);
+    } finally {
+      agent.destroy();
+    }
+  });
+});
+
+test("node HTTP-forward agent honors req.setTimeout during stalled proxy handshakes", async () => {
+  await withStalledTlsProxy(async (proxyUrl, activeSockets) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
+    };
+    const agent = createNodeProxyAgent(resolver, undefined, "http");
+    try {
+      await assert.rejects(
+        new Promise<void>((resolve, reject) => {
+          const req = http.get("http://example.test/allowed", { agent }, () => {
+            resolve();
+          });
+          req.setTimeout(50, () => {
+            req.destroy(new Error("late request timeout"));
+          });
+          req.on("error", reject);
+        }),
+        /timeout|timed out/,
+      );
+      for (let attempt = 0; attempt < 20 && activeSockets.size > 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.equal(activeSockets.size, 0);
+    } finally {
+      agent.destroy();
+    }
+  });
+});
+
+test("node HTTP-forward agent clears pending timeouts when req.setTimeout disables them", async () => {
+  await withStalledTlsProxy(async (proxyUrl, activeSockets) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
+    };
+    const agent = createNodeProxyAgent(resolver, undefined, "http");
+    const req = http.get("http://example.test/allowed", { agent, timeout: 50 }, () => {});
+    let requestError: Error | undefined;
+    req.on("error", (error) => {
+      requestError = error;
+    });
+    try {
+      req.setTimeout(0);
+      for (let attempt = 0; attempt < 20 && activeSockets.size === 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.equal(activeSockets.size, 1);
+
+      await new Promise((resolve) => setTimeout(resolve, 120));
+
+      assert.equal(requestError, undefined);
+      assert.equal(activeSockets.size, 1);
+    } finally {
+      req.destroy();
+      agent.destroy();
+    }
+  });
+});
+
 test("node CONNECT agent fails requests when destination TLS closes during handshake", async () => {
   const netMutable = net as unknown as { connect: (...args: unknown[]) => net.Socket };
   const tlsMutable = tls as unknown as { connect: (...args: unknown[]) => tls.TLSSocket };

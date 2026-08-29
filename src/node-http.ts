@@ -421,6 +421,8 @@ class ProxylineHttpForwardAgent extends http.Agent {
   public readonly options: NodeAgentOptions;
   readonly #keepAlive: boolean;
   readonly #pendingConnectSockets = new Set<net.Socket>();
+  readonly #pendingRequests = new WeakMap<NodeAgentRequestOptions, http.ClientRequest>();
+  readonly #pendingRequestQueue: http.ClientRequest[] = [];
   readonly #proxy: URL;
   readonly #proxyTls: ProxylineTlsOptions | undefined;
 
@@ -435,25 +437,87 @@ class ProxylineHttpForwardAgent extends http.Agent {
   public addRequest(req: http.ClientRequest, options: NodeAgentRequestOptions): void {
     setForwardProxyRequestPath(req as http.ClientRequest & { _header?: string | null }, options);
     setProxyRequestHeaders(req, this.#proxy, this.#keepAlive);
-    (http.Agent.prototype as unknown as NodeAddRequestAgent).addRequest.call(this, req, options);
+    this.#pendingRequests.set(options, req);
+    this.#pendingRequestQueue.push(req);
+    req.once("socket", () => this.#removePendingRequest(req));
+    req.once("close", () => this.#removePendingRequest(req));
+    try {
+      (http.Agent.prototype as unknown as NodeAddRequestAgent).addRequest.call(this, req, options);
+    } catch (error) {
+      this.#pendingRequests.delete(options);
+      this.#removePendingRequest(req);
+      throw error;
+    }
+  }
+
+  #removePendingRequest(req: http.ClientRequest): void {
+    const index = this.#pendingRequestQueue.indexOf(req);
+    if (index !== -1) {
+      this.#pendingRequestQueue.splice(index, 1);
+    }
   }
 
   public override createConnection(
-    _options: NodeAgentRequestOptions,
+    options: NodeAgentRequestOptions,
     callback?: (error: Error | null, socket: net.Socket) => void,
   ): net.Socket {
+    const mappedRequest = this.#pendingRequests.get(options);
+    const request = mappedRequest ?? this.#pendingRequestQueue.shift();
+    this.#pendingRequests.delete(options);
+    if (mappedRequest !== undefined) {
+      this.#removePendingRequest(mappedRequest);
+    }
     const socket = connectToProxy(this.#proxy, this.#proxyTls);
     // When Node supplies an async callback, deliver the socket only through that
     // path. Returning the same socket as well double-invokes Agent setup and can
     // hand an unready TLS proxy socket to plain HTTP forward traffic.
     if (callback !== undefined) {
       this.#pendingConnectSockets.add(socket);
+      let pendingTimeout: ReturnType<typeof setTimeout> | undefined;
       let settled = false;
+      let originalRequestSetTimeout: RequestSetTimeout | undefined;
+      let hookedRequestSetTimeout: RequestSetTimeout | undefined;
+
+      const startPendingTimeout = (timeoutMs: number): void => {
+        if (pendingTimeout !== undefined) {
+          clearTimeout(pendingTimeout);
+        }
+        pendingTimeout = setTimeout(() => {
+          request?.emit("timeout");
+          if (!settled) {
+            fail(new ProxylineError("CONNECT_FAILED", "proxy connection timed out"));
+          }
+        }, timeoutMs);
+        pendingTimeout.unref?.();
+      };
+
+      const clearPendingTimeout = (): void => {
+        if (pendingTimeout !== undefined) {
+          clearTimeout(pendingTimeout);
+          pendingTimeout = undefined;
+        }
+      };
+
+      const restoreRequestTimeoutHook = (): void => {
+        if (
+          request !== undefined &&
+          originalRequestSetTimeout !== undefined &&
+          request.setTimeout === hookedRequestSetTimeout
+        ) {
+          request.setTimeout = originalRequestSetTimeout;
+        }
+        originalRequestSetTimeout = undefined;
+        hookedRequestSetTimeout = undefined;
+      };
+
       const cleanup = (): void => {
+        clearPendingTimeout();
         this.#pendingConnectSockets.delete(socket);
+        restoreRequestTimeoutHook();
         socket.off(this.#proxy.protocol === "https:" ? "secureConnect" : "connect", onConnected);
         socket.off("error", onError);
         socket.off("close", onClosed);
+        request?.off("timeout", onRequestTimedOut);
       };
       const finish = (error: Error | null): void => {
         if (settled) {
@@ -462,6 +526,10 @@ class ProxylineHttpForwardAgent extends http.Agent {
         settled = true;
         cleanup();
         callback(error, socket);
+      };
+      const fail = (error: Error): void => {
+        socket.destroy();
+        finish(error);
       };
       const onError = (error: Error): void => {
         finish(error);
@@ -472,6 +540,45 @@ class ProxylineHttpForwardAgent extends http.Agent {
       const onConnected = (): void => {
         finish(null);
       };
+      const onRequestTimedOut = (): void => {
+        if (!settled) {
+          fail(new ProxylineError("CONNECT_FAILED", "proxy connection timed out"));
+        }
+      };
+
+      if (request !== undefined) {
+        originalRequestSetTimeout = request.setTimeout;
+        hookedRequestSetTimeout = function hookedSetTimeout(timeout, callback) {
+          const result = originalRequestSetTimeout?.call(this, timeout, callback) ?? this;
+          const timeoutMs = normalizedPositiveInteger(timeout);
+          if (timeoutMs !== undefined) {
+            startPendingTimeout(timeoutMs);
+          } else {
+            clearPendingTimeout();
+          }
+          return result;
+        };
+        request.setTimeout = hookedRequestSetTimeout;
+      }
+
+      // Prefer explicit agent/request timeout. Default 30s only when both are omitted.
+      // Explicit values go through normalizedPositiveInteger first so fractional/invalid
+      // timeouts keep the historical no-pending-timer behavior (not Math.trunc to 1ms).
+      const requestTimeout = (request as { timeout?: unknown } | undefined)?.timeout;
+      const rawTimeout = options.timeout !== undefined ? options.timeout : requestTimeout;
+      if (rawTimeout === undefined) {
+        const connectTimeoutMs = resolveProxyConnectTimeoutMs(undefined);
+        if (connectTimeoutMs !== undefined) {
+          startPendingTimeout(connectTimeoutMs);
+        }
+      } else {
+        const timeoutMs = normalizedPositiveInteger(rawTimeout);
+        if (timeoutMs !== undefined) {
+          startPendingTimeout(timeoutMs);
+        }
+      }
+      request?.once("timeout", onRequestTimedOut);
+
       socket.once(this.#proxy.protocol === "https:" ? "secureConnect" : "connect", onConnected);
       socket.once("error", onError);
       socket.once("close", onClosed);
