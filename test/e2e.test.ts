@@ -850,6 +850,56 @@ test("node HTTP-forward agent destroys pending proxy sockets when the agent is d
   });
 });
 
+test("node HTTP-forward helper agents cancel pending sockets when the request is aborted", async () => {
+  await withStalledTlsProxy(async (proxyUrl, activeSockets) => {
+    const originalHttpGet = http.get;
+    const handle = installGlobalProxy({ mode: "managed", proxyUrl });
+    const helperAgent = handle.createNodeAgent();
+    const ambientAgent = withProxyEnv({ HTTP_PROXY: proxyUrl, ALL_PROXY: proxyUrl }, () =>
+      createAmbientNodeProxyAgent({ protocol: "http" }),
+    );
+    assert.ok(ambientAgent);
+
+    const assertAbortCancelsPendingSocket = async (agent: http.Agent): Promise<void> => {
+      const req = originalHttpGet("http://example.test/allowed", { agent }, () => {});
+      const requestClosed = new Promise<void>((resolve) => {
+        req.once("error", () => resolve());
+        req.once("close", () => resolve());
+      });
+      try {
+        for (let attempt = 0; attempt < 20 && activeSockets.size === 0; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        assert.equal(activeSockets.size, 1);
+
+        req.destroy();
+
+        await Promise.race([
+          requestClosed,
+          new Promise<never>((_resolve, reject) => {
+            setTimeout(() => reject(new Error("request remained pending after abort")), 500);
+          }),
+        ]);
+        for (let attempt = 0; attempt < 80 && activeSockets.size > 0; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        assert.equal(activeSockets.size, 0);
+      } finally {
+        req.destroy();
+      }
+    };
+
+    try {
+      await assertAbortCancelsPendingSocket(helperAgent);
+      await assertAbortCancelsPendingSocket(ambientAgent);
+    } finally {
+      helperAgent.destroy();
+      ambientAgent.destroy();
+      handle.stop();
+    }
+  });
+});
+
 test("node CONNECT agent fails requests when destination TLS closes during handshake", async () => {
   const netMutable = net as unknown as { connect: (...args: unknown[]) => net.Socket };
   const tlsMutable = tls as unknown as { connect: (...args: unknown[]) => tls.TLSSocket };

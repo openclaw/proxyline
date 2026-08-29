@@ -2,6 +2,8 @@
 
 ## 0.3.8 - Unreleased
 
+- Fixed HTTP-forward Node agents to cancel pending proxy sockets when the caller aborts or destroys the request during the handshake. Thanks @SebTardif.
+
 ## 0.3.7 - 2026-08-02
 
 - Fixed Node HTTP/HTTPS proxy agents to apply the default 30-second CONNECT timeout when callers omit a request timeout; explicit `0` remains unbounded. Thanks @SebTardif.

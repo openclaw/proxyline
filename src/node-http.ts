@@ -30,6 +30,7 @@ type RequestSetTimeout = (
   timeout: number,
   callback?: () => void,
 ) => http.ClientRequest;
+type RequestDestroy = (this: http.ClientRequest, error?: Error) => http.ClientRequest;
 type NodeAgentWithOptions = http.Agent & {
   options?: NodeAgentOptions;
 };
@@ -421,6 +422,8 @@ class ProxylineHttpForwardAgent extends http.Agent {
   public readonly options: NodeAgentOptions;
   readonly #keepAlive: boolean;
   readonly #pendingConnectSockets = new Set<net.Socket>();
+  readonly #pendingRequests = new WeakMap<NodeAgentRequestOptions, http.ClientRequest>();
+  readonly #pendingRequestQueue: http.ClientRequest[] = [];
   readonly #proxy: URL;
   readonly #proxyTls: ProxylineTlsOptions | undefined;
 
@@ -435,13 +438,36 @@ class ProxylineHttpForwardAgent extends http.Agent {
   public addRequest(req: http.ClientRequest, options: NodeAgentRequestOptions): void {
     setForwardProxyRequestPath(req as http.ClientRequest & { _header?: string | null }, options);
     setProxyRequestHeaders(req, this.#proxy, this.#keepAlive);
-    (http.Agent.prototype as unknown as NodeAddRequestAgent).addRequest.call(this, req, options);
+    this.#pendingRequests.set(options, req);
+    this.#pendingRequestQueue.push(req);
+    req.once("socket", () => this.#removePendingRequest(req));
+    req.once("close", () => this.#removePendingRequest(req));
+    try {
+      (http.Agent.prototype as unknown as NodeAddRequestAgent).addRequest.call(this, req, options);
+    } catch (error) {
+      this.#pendingRequests.delete(options);
+      this.#removePendingRequest(req);
+      throw error;
+    }
+  }
+
+  #removePendingRequest(req: http.ClientRequest): void {
+    const index = this.#pendingRequestQueue.indexOf(req);
+    if (index !== -1) {
+      this.#pendingRequestQueue.splice(index, 1);
+    }
   }
 
   public override createConnection(
-    _options: NodeAgentRequestOptions,
+    options: NodeAgentRequestOptions,
     callback?: (error: Error | null, socket: net.Socket) => void,
   ): net.Socket {
+    const mappedRequest = this.#pendingRequests.get(options);
+    const request = mappedRequest ?? this.#pendingRequestQueue.shift();
+    this.#pendingRequests.delete(options);
+    if (mappedRequest !== undefined) {
+      this.#removePendingRequest(mappedRequest);
+    }
     const socket = connectToProxy(this.#proxy, this.#proxyTls);
     // When Node supplies an async callback, deliver the socket only through that
     // path. Returning the same socket as well double-invokes Agent setup and can
@@ -449,11 +475,28 @@ class ProxylineHttpForwardAgent extends http.Agent {
     if (callback !== undefined) {
       this.#pendingConnectSockets.add(socket);
       let settled = false;
+      let originalRequestDestroy: RequestDestroy | undefined;
+      let hookedRequestDestroy: RequestDestroy | undefined;
+      const restoreRequestDestroyHook = (): void => {
+        if (
+          request !== undefined &&
+          originalRequestDestroy !== undefined &&
+          request.destroy === hookedRequestDestroy
+        ) {
+          request.destroy = originalRequestDestroy;
+        }
+        originalRequestDestroy = undefined;
+        hookedRequestDestroy = undefined;
+      };
       const cleanup = (): void => {
         this.#pendingConnectSockets.delete(socket);
+        restoreRequestDestroyHook();
         socket.off(this.#proxy.protocol === "https:" ? "secureConnect" : "connect", onConnected);
         socket.off("error", onError);
         socket.off("close", onClosed);
+        request?.off("abort", onRequestClosed);
+        request?.off("close", onRequestClosed);
+        request?.off("error", onRequestClosed);
       };
       const finish = (error: Error | null): void => {
         if (settled) {
@@ -462,6 +505,10 @@ class ProxylineHttpForwardAgent extends http.Agent {
         settled = true;
         cleanup();
         callback(error, socket);
+      };
+      const fail = (error: Error): void => {
+        socket.destroy();
+        finish(error);
       };
       const onError = (error: Error): void => {
         finish(error);
@@ -472,9 +519,30 @@ class ProxylineHttpForwardAgent extends http.Agent {
       const onConnected = (): void => {
         finish(null);
       };
+      const onRequestClosed = (): void => {
+        if (!settled) {
+          fail(new ProxylineError("CONNECT_FAILED", "request closed before proxy connection completed"));
+        }
+      };
       socket.once(this.#proxy.protocol === "https:" ? "secureConnect" : "connect", onConnected);
       socket.once("error", onError);
       socket.once("close", onClosed);
+      // Node defers ClientRequest.destroy() until the async socket callback.
+      if (request !== undefined) {
+        originalRequestDestroy = request.destroy;
+        hookedRequestDestroy = function hookedDestroy(this: http.ClientRequest, error?: Error) {
+          const result = originalRequestDestroy?.call(this, error) ?? this;
+          onRequestClosed();
+          return result;
+        };
+        request.destroy = hookedRequestDestroy;
+      }
+      request?.once("abort", onRequestClosed);
+      request?.once("close", onRequestClosed);
+      request?.once("error", onRequestClosed);
+      if (request?.destroyed) {
+        onRequestClosed();
+      }
       return undefined as unknown as net.Socket;
     }
     return socket;
