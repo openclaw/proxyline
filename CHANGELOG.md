@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.9 - Unreleased
+
 ## 0.3.8 - 2026-08-31
 
 - Fixed HTTP-forward Node agents to enforce the default 30-second proxy handshake timeout and cancel pending sockets when callers abort or destroy requests; explicit `0` remains unbounded. (#27) Thanks @SebTardif.
