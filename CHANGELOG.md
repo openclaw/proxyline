@@ -1,10 +1,13 @@
 # Changelog
 
-## 0.3.8 - Unreleased
+## 0.3.8 - 2026-08-31
 
-- Fixed HTTP-forward Node agents to cancel pending proxy sockets when the caller aborts or destroys the request during the handshake. Thanks @SebTardif.
-- Fixed HTTP-forward Node agents to apply the default 30-second proxy connect timeout when callers omit a request timeout; explicit `0` remains unbounded. Thanks @SebTardif.
-- Fixed Node proxy request hooks to follow the selected request when finite connection pools queue requests across origins.
+- Fixed HTTP-forward Node agents to enforce the default 30-second proxy handshake timeout and cancel pending sockets when callers abort or destroy requests; explicit `0` remains unbounded. (#27) Thanks @SebTardif.
+- Fixed Node proxy request hooks to follow the request selected by finite connection pools across origins, keeping queued requests' timeouts and cancellation independent. (#27)
+- Hardened ambient `NO_PROXY` hostname normalization against dot-heavy input, docs table-of-contents text extraction, and proxy/TLS test isolation. (#24) Thanks @vincentkoc.
+- Fixed HTTP-forward agent shutdown to destroy pending proxy sockets and settle requests before the connection handshake completes. (#23) Thanks @SebTardif.
+- Fixed throwing `onEvent` observers to preserve successful installation and leave the proxy runtime stoppable and replaceable. (#23) Thanks @SebTardif.
+- Updated Node types, tsx, ws, and pnpm tooling. (#21, #22)
 
 ## 0.3.7 - 2026-08-02
 
