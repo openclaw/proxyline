@@ -19,6 +19,7 @@ import {
 import { createNodeProxyAgent } from "../src/node-http.js";
 import type { ProxyResolver } from "../src/types.js";
 import { startProxyLab } from "./support/proxy-lab.js";
+import { createProxyTestCertificate } from "./support/proxy-cert.js";
 
 function withProxyEnv<T>(env: Record<string, string | undefined>, run: () => T): T {
   const keys = [
@@ -850,6 +851,147 @@ test("node HTTP-forward agent destroys pending proxy sockets when the agent is d
   });
 });
 
+test("node HTTP-forward agent defaults omitted timeout to 30 seconds", async (t) => {
+  const originalSetTimeout = globalThis.setTimeout;
+  const observedTimeouts: number[] = [];
+  t.mock.method(
+    globalThis,
+    "setTimeout",
+    ((callback: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => {
+      observedTimeouts.push(delay ?? 0);
+      return originalSetTimeout(callback, delay === 30_000 ? 20 : delay, ...args);
+    }) as typeof setTimeout,
+  );
+
+  await withStalledTlsProxy(async (proxyUrl) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
+    };
+    const agent = createNodeProxyAgent(resolver, undefined, "http");
+    try {
+      await assert.rejects(
+        new Promise<void>((resolve, reject) => {
+          const req = http.get("http://example.test/allowed", { agent }, () => {
+            resolve();
+          });
+          req.on("error", reject);
+        }),
+        /timed out/,
+      );
+    } finally {
+      agent.destroy();
+    }
+  });
+  assert.ok(
+    observedTimeouts.includes(30_000),
+    `expected a 30s HTTP-forward connect timeout, got ${JSON.stringify(observedTimeouts)}`,
+  );
+});
+
+test("node HTTP-forward agent times out stalled proxy handshakes", async () => {
+  await withStalledTlsProxy(async (proxyUrl, activeSockets) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
+    };
+    const agent = createNodeProxyAgent(resolver, undefined, "http");
+    try {
+      await assert.rejects(
+        new Promise<void>((resolve, reject) => {
+          const req = http.get("http://example.test/allowed", { agent, timeout: 50 }, () => {
+            resolve();
+          });
+          req.on("error", reject);
+        }),
+        /timed out/,
+      );
+      for (let attempt = 0; attempt < 20 && activeSockets.size > 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.equal(activeSockets.size, 0);
+    } finally {
+      agent.destroy();
+    }
+  });
+});
+
+test("node HTTP-forward agent honors req.setTimeout during stalled proxy handshakes", async () => {
+  await withStalledTlsProxy(async (proxyUrl, activeSockets) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
+    };
+    const agent = createNodeProxyAgent(resolver, undefined, "http");
+    try {
+      await assert.rejects(
+        new Promise<void>((resolve, reject) => {
+          const req = http.get("http://example.test/allowed", { agent }, () => {
+            resolve();
+          });
+          req.setTimeout(50, () => {
+            req.destroy(new Error("late request timeout"));
+          });
+          req.on("error", reject);
+        }),
+        /timeout|timed out/,
+      );
+      for (let attempt = 0; attempt < 20 && activeSockets.size > 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.equal(activeSockets.size, 0);
+    } finally {
+      agent.destroy();
+    }
+  });
+});
+
+test("node HTTP-forward agent clears pending timeouts when req.setTimeout disables them", async () => {
+  await withStalledTlsProxy(async (proxyUrl, activeSockets) => {
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => proxyUrl,
+      explain: () => {
+        throw new Error("not used");
+      },
+      getProxyForUrl: () => proxyUrl,
+    };
+    const agent = createNodeProxyAgent(resolver, undefined, "http");
+    const req = http.get("http://example.test/allowed", { agent, timeout: 50 }, () => {});
+    let requestError: Error | undefined;
+    req.on("error", (error) => {
+      requestError = error;
+    });
+    try {
+      req.setTimeout(0);
+      for (let attempt = 0; attempt < 20 && activeSockets.size === 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.equal(activeSockets.size, 1);
+
+      await new Promise((resolve) => setTimeout(resolve, 120));
+
+      assert.equal(requestError, undefined);
+      assert.equal(activeSockets.size, 1);
+    } finally {
+      req.destroy();
+      agent.destroy();
+    }
+  });
+});
+
 test("node HTTP-forward helper agents cancel pending sockets when the request is aborted", async () => {
   await withStalledTlsProxy(async (proxyUrl, activeSockets) => {
     const originalHttpGet = http.get;
@@ -899,6 +1041,93 @@ test("node HTTP-forward helper agents cancel pending sockets when the request is
     }
   });
 });
+
+for (const [protocol, action] of [["http", "timeout"], ["https", "timeout"], ["http", "destroy"]] as const) {
+  test(`node ${protocol} proxy ${action} follows the request selected from the pool`, { timeout: 10_000 }, async () => {
+    const certificate = await createProxyTestCertificate({ dnsNames: ["a.test", "b.test"] });
+    const secureContext = tls.createSecureContext({ key: certificate.privateKey, cert: certificate.certificate });
+    const sockets = new Set<net.Socket>();
+    let connections = 0;
+    let firstTls: tls.TLSSocket | undefined;
+    const proxy = net.createServer((socket) => {
+      connections += 1;
+      sockets.add(socket);
+      socket.on("error", () => {});
+      socket.on("close", () => sockets.delete(socket));
+      if (connections !== 1) {
+        socket.resume();
+        return;
+      }
+      const acceptTls = (): void => {
+        firstTls = new tls.TLSSocket(socket, { isServer: true, secureContext });
+        firstTls.on("error", () => {});
+        firstTls.on("data", () => {});
+      };
+      if (protocol === "https") {
+        socket.once("data", () => {
+          socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+          acceptTls();
+        });
+      } else {
+        acceptTls();
+      }
+    });
+    proxy.listen(0, "127.0.0.1");
+    await once(proxy, "listening");
+    const proxyUrl = `${protocol === "http" ? "https" : "http"}://127.0.0.1:${(proxy.address() as AddressInfo).port}`;
+    const agent = withProxyEnv({ HTTP_PROXY: proxyUrl, HTTPS_PROXY: proxyUrl }, () =>
+      createAmbientNodeProxyAgent({ protocol, proxyTls: { ca: certificate.certificate } }),
+    );
+    assert.ok(agent);
+    Object.assign(agent.options, { maxSockets: 1, maxTotalSockets: 1, keepAlive: false });
+    const requests: http.ClientRequest[] = [];
+    const send = (host: string) => {
+      const req = (protocol === "http" ? http : https).get(`${protocol}://${host}/allowed`, {
+        agent, timeout: 0, ca: certificate.certificate,
+      });
+      const result = { req, error: undefined as Error | undefined, timeouts: 0 };
+      req.on("error", (error) => { result.error = error; });
+      req.on("timeout", () => { result.timeouts += 1; });
+      requests.push(req);
+      return result;
+    };
+    try {
+      const first = send("a.test");
+      await once(first.req, "socket");
+      const older = send("b.test");
+      const selected = send("a.test");
+      const selectedError = (): Error | undefined => selected.error;
+      // Releasing A's socket selects A2 ahead of the older B request.
+      assert.ok(firstTls);
+      firstTls.destroy();
+      for (let attempt = 0; attempt < 100 && connections < 2; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.equal(connections, 2);
+      if (action === "destroy") older.req.destroy();
+      else older.req.setTimeout(50);
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      assert.equal(older.timeouts, 0);
+      assert.equal(selected.error, undefined);
+      assert.equal(sockets.size, 1);
+
+      if (action === "destroy") selected.req.destroy();
+      else selected.req.setTimeout(50);
+      for (let attempt = 0; attempt < 100 && selectedError() === undefined; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.match(selectedError()?.message ?? "", action === "timeout" ? /timed out/ : /request closed/);
+      assert.equal(selected.timeouts, action === "timeout" ? 1 : 0);
+      assert.equal(older.timeouts, 0);
+    } finally {
+      for (const req of requests) req.destroy();
+      agent.destroy();
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => proxy.close(() => resolve()));
+      await certificate.cleanup();
+    }
+  });
+}
 
 test("node CONNECT agent fails requests when destination TLS closes during handshake", async () => {
   const netMutable = net as unknown as { connect: (...args: unknown[]) => net.Socket };
