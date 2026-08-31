@@ -3,6 +3,7 @@
 ## 0.3.8 - Unreleased
 
 - Fixed HTTP-forward Node agents to apply the default 30-second proxy connect timeout when callers omit a request timeout; explicit `0` remains unbounded. Thanks @SebTardif.
+- Fixed Node proxy timeout hooks to follow the selected request when finite connection pools queue requests across origins.
 
 ## 0.3.7 - 2026-08-02
 

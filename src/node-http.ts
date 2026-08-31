@@ -19,11 +19,20 @@ export type NodeHttpRequestOptions = http.RequestOptions & https.RequestOptions 
 type NodeHttpMethod = typeof http.request;
 type NodeAgentFactory = (options: NodeHttpRequestOptions) => http.Agent;
 type NodeAgentOptions = http.AgentOptions & https.AgentOptions;
+const pendingRequestSymbol = Symbol("proxyline.pendingRequest");
 type NodeAgentRequestOptions = http.RequestOptions & https.RequestOptions & {
   secureEndpoint?: boolean;
+  [pendingRequestSymbol]?: http.ClientRequest;
 };
 type NodeAddRequestAgent = http.Agent & {
   addRequest(req: http.ClientRequest, options: NodeAgentRequestOptions): void;
+};
+type NodeCreateSocketAgent = http.Agent & {
+  createSocket(
+    req: http.ClientRequest,
+    options: NodeAgentRequestOptions,
+    callback: (error: Error | null, socket?: net.Socket) => void,
+  ): void;
 };
 type RequestSetTimeout = (
   this: http.ClientRequest,
@@ -417,12 +426,34 @@ function destinationTlsConnectOptions(
   return tlsOptions;
 }
 
-class ProxylineHttpForwardAgent extends http.Agent {
+abstract class ProxylineRequestAgent extends http.Agent {
+  public addRequest(req: http.ClientRequest, options: NodeAgentRequestOptions): void {
+    (http.Agent.prototype as unknown as NodeAddRequestAgent).addRequest.call(this, req, options);
+  }
+
+  public createSocket(
+    req: http.ClientRequest,
+    options: NodeAgentRequestOptions,
+    callback: (error: Error | null, socket?: net.Socket) => void,
+  ): void {
+    // Node chooses queued requests by origin, not global FIFO, and clones options.
+    (http.Agent.prototype as unknown as NodeCreateSocketAgent).createSocket.call(
+      this, req, { ...options, [pendingRequestSymbol]: req }, callback,
+    );
+  }
+
+  protected takePendingRequest(options: NodeAgentRequestOptions): http.ClientRequest | undefined {
+    const request = options[pendingRequestSymbol];
+    // Node retains these options in pooled socket listeners after handoff.
+    delete options[pendingRequestSymbol];
+    return request;
+  }
+}
+
+class ProxylineHttpForwardAgent extends ProxylineRequestAgent {
   public readonly options: NodeAgentOptions;
   readonly #keepAlive: boolean;
   readonly #pendingConnectSockets = new Set<net.Socket>();
-  readonly #pendingRequests = new WeakMap<NodeAgentRequestOptions, http.ClientRequest>();
-  readonly #pendingRequestQueue: http.ClientRequest[] = [];
   readonly #proxy: URL;
   readonly #proxyTls: ProxylineTlsOptions | undefined;
 
@@ -434,39 +465,17 @@ class ProxylineHttpForwardAgent extends http.Agent {
     this.#proxyTls = proxyTls;
   }
 
-  public addRequest(req: http.ClientRequest, options: NodeAgentRequestOptions): void {
+  public override addRequest(req: http.ClientRequest, options: NodeAgentRequestOptions): void {
     setForwardProxyRequestPath(req as http.ClientRequest & { _header?: string | null }, options);
     setProxyRequestHeaders(req, this.#proxy, this.#keepAlive);
-    this.#pendingRequests.set(options, req);
-    this.#pendingRequestQueue.push(req);
-    req.once("socket", () => this.#removePendingRequest(req));
-    req.once("close", () => this.#removePendingRequest(req));
-    try {
-      (http.Agent.prototype as unknown as NodeAddRequestAgent).addRequest.call(this, req, options);
-    } catch (error) {
-      this.#pendingRequests.delete(options);
-      this.#removePendingRequest(req);
-      throw error;
-    }
-  }
-
-  #removePendingRequest(req: http.ClientRequest): void {
-    const index = this.#pendingRequestQueue.indexOf(req);
-    if (index !== -1) {
-      this.#pendingRequestQueue.splice(index, 1);
-    }
+    super.addRequest(req, options);
   }
 
   public override createConnection(
     options: NodeAgentRequestOptions,
     callback?: (error: Error | null, socket: net.Socket) => void,
   ): net.Socket {
-    const mappedRequest = this.#pendingRequests.get(options);
-    const request = mappedRequest ?? this.#pendingRequestQueue.shift();
-    this.#pendingRequests.delete(options);
-    if (mappedRequest !== undefined) {
-      this.#removePendingRequest(mappedRequest);
-    }
+    const request = this.takePendingRequest(options);
     const socket = connectToProxy(this.#proxy, this.#proxyTls);
     // When Node supplies an async callback, deliver the socket only through that
     // path. Returning the same socket as well double-invokes Agent setup and can
@@ -596,12 +605,10 @@ class ProxylineHttpForwardAgent extends http.Agent {
   }
 }
 
-class ProxylineConnectAgent extends http.Agent {
+class ProxylineConnectAgent extends ProxylineRequestAgent {
   public readonly options: NodeAgentOptions;
   readonly #keepAlive: boolean;
   readonly #pendingConnectSockets = new Set<net.Socket>();
-  readonly #pendingRequests = new WeakMap<NodeAgentRequestOptions, http.ClientRequest>();
-  readonly #pendingRequestQueue: http.ClientRequest[] = [];
   readonly #proxy: URL;
   readonly #proxyTls: ProxylineTlsOptions | undefined;
 
@@ -613,37 +620,11 @@ class ProxylineConnectAgent extends http.Agent {
     this.#proxyTls = proxyTls;
   }
 
-  public addRequest(req: http.ClientRequest, options: NodeAgentRequestOptions): void {
-    this.#pendingRequests.set(options, req);
-    this.#pendingRequestQueue.push(req);
-    req.once("socket", () => this.#removePendingRequest(req));
-    req.once("close", () => this.#removePendingRequest(req));
-    try {
-      (http.Agent.prototype as unknown as NodeAddRequestAgent).addRequest.call(this, req, options);
-    } catch (error) {
-      this.#pendingRequests.delete(options);
-      this.#removePendingRequest(req);
-      throw error;
-    }
-  }
-
-  #removePendingRequest(req: http.ClientRequest): void {
-    const index = this.#pendingRequestQueue.indexOf(req);
-    if (index !== -1) {
-      this.#pendingRequestQueue.splice(index, 1);
-    }
-  }
-
   public override createConnection(
     options: NodeAgentRequestOptions,
     callback?: (error: Error | null, socket: net.Socket) => void,
   ): net.Socket {
-    const mappedRequest = this.#pendingRequests.get(options);
-    const request = mappedRequest ?? this.#pendingRequestQueue.shift();
-    this.#pendingRequests.delete(options);
-    if (mappedRequest !== undefined) {
-      this.#removePendingRequest(mappedRequest);
-    }
+    const request = this.takePendingRequest(options);
     if (callback === undefined) {
       throw new ProxylineError("INVALID_CONNECT_CALLBACK", "CONNECT agents require an async socket callback.");
     }
