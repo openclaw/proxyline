@@ -17,7 +17,7 @@
     "url": "https://github.com/openclaw/proxyline/issues"
   },
   "homepage": "https://proxyline.dev",
-  "packageManager": "pnpm@11.24.0",
+  "packageManager": "pnpm@11.25.0",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -62,11 +62,11 @@
     "crabbox:warmup": "crabbox warmup"
   },
   "devDependencies": {
-    "@types/node": "26.4.0",
+    "@types/node": "26.4.1",
     "@types/ws": "8.18.1",
-    "tsx": "4.23.12",
+    "tsx": "4.23.13",
     "typescript": "^7.0.2",
-    "undici": "8.10.0",
+    "undici": "8.10.1",
     "ws": "8.21.3"
   },
   "engines": {
