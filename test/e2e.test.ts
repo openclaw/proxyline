@@ -1042,7 +1042,7 @@ test("node HTTP-forward helper agents cancel pending sockets when the request is
   });
 });
 
-for (const [protocol, action] of [["http", "timeout"], ["https", "timeout"], ["http", "destroy"]] as const) {
+for (const [protocol, action] of [["http", "timeout"], ["https", "timeout"], ["http", "destroy"], ["https", "destroy"]] as const) {
   test(`node ${protocol} proxy ${action} follows the request selected from the pool`, { timeout: 10_000 }, async () => {
     const certificate = await createProxyTestCertificate({ dnsNames: ["a.test", "b.test"] });
     const secureContext = tls.createSecureContext({ key: certificate.privateKey, cert: certificate.certificate });

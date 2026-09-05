@@ -676,6 +676,8 @@ class ProxylineConnectAgent extends ProxylineRequestAgent {
     let responseBuffer = Buffer.alloc(0);
     let originalRequestSetTimeout: RequestSetTimeout | undefined;
     let hookedRequestSetTimeout: RequestSetTimeout | undefined;
+    let originalRequestDestroy: RequestDestroy | undefined;
+    let hookedRequestDestroy: RequestDestroy | undefined;
     let tlsSocket: tls.TLSSocket | undefined;
 
     const startPendingTimeout = (timeoutMs: number): void => {
@@ -710,6 +712,18 @@ class ProxylineConnectAgent extends ProxylineRequestAgent {
       hookedRequestSetTimeout = undefined;
     };
 
+    const restoreRequestDestroyHook = (): void => {
+      if (
+        request !== undefined &&
+        originalRequestDestroy !== undefined &&
+        request.destroy === hookedRequestDestroy
+      ) {
+        request.destroy = originalRequestDestroy;
+      }
+      originalRequestDestroy = undefined;
+      hookedRequestDestroy = undefined;
+    };
+
     const cleanupProxyHandshakeListeners = (): void => {
       proxySocket.off("data", onData);
       proxySocket.off("error", onError);
@@ -726,6 +740,7 @@ class ProxylineConnectAgent extends ProxylineRequestAgent {
         this.#pendingConnectSockets.delete(tlsSocket);
       }
       restoreRequestTimeoutHook();
+      restoreRequestDestroyHook();
       cleanupProxyHandshakeListeners();
       request?.off("abort", onRequestClosed);
       request?.off("close", onRequestClosed);
@@ -871,10 +886,23 @@ class ProxylineConnectAgent extends ProxylineRequestAgent {
         startPendingTimeout(timeoutMs);
       }
     }
+    request?.once("timeout", onRequestTimedOut);
+    // Node defers ClientRequest.destroy() until the async socket callback.
+    if (request !== undefined) {
+      originalRequestDestroy = request.destroy;
+      hookedRequestDestroy = function hookedDestroy(this: http.ClientRequest, error?: Error) {
+        const result = originalRequestDestroy?.call(this, error) ?? this;
+        onRequestClosed();
+        return result;
+      };
+      request.destroy = hookedRequestDestroy;
+    }
     request?.once("abort", onRequestClosed);
     request?.once("close", onRequestClosed);
     request?.once("error", onRequestClosed);
-    request?.once("timeout", onRequestTimedOut);
+    if (request?.destroyed) {
+      onRequestClosed();
+    }
 
     proxySocket.once(this.#proxy.protocol === "https:" ? "secureConnect" : "connect", onConnected);
     proxySocket.on("data", onData);

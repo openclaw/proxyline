@@ -2,6 +2,7 @@
 
 ## 0.3.9 - Unreleased
 
+- Fixed Node CONNECT agents to cancel pending proxy sockets when callers abort or destroy requests, matching HTTP-forward cancellation. Thanks @SebTardif.
 - Updated the Undici test peer, Node types, tsx, pnpm, and GitHub Pages deployment tooling.
 
 ## 0.3.8 - 2026-08-31
