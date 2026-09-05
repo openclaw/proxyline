@@ -2,8 +2,10 @@
 
 ## 0.3.9 - Unreleased
 
+**Highlights:** Destroying a pending HTTPS request now releases its stalled proxy connection immediately.
+
 - Fixed Node CONNECT agents to cancel pending proxy sockets when callers abort or destroy requests, matching HTTP-forward cancellation. Thanks @SebTardif.
-- Updated the Undici test peer, Node types, tsx, pnpm, and GitHub Pages deployment tooling.
+- Updated the Undici test peer, Node types, tsx, pnpm, Node.js release tooling, and GitHub Pages deployment tooling.
 
 ## 0.3.8 - 2026-08-31
 
