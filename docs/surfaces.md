@@ -24,7 +24,7 @@ This means caller agents are not just ignored — the per-request agent is repla
 
 HTTP-forward proxy connections and CONNECT handshakes default to a 30-second connection timeout. A request's `timeout` option or `req.setTimeout(ms)` can change the pending handshake timeout; use `0` to leave it unbounded. Expiry emits `timeout` on that request and fails the pending connection with `CONNECT_FAILED`. This applies to the explicit Node helper agents as well as patched requests.
 
-For HTTP-forward requests, `req.destroy()` or `req.abort()` also cancels a pending connection to the proxy. This applies to long-lived helper agents: cancellation releases the pending socket without destroying the whole agent or affecting another queued request.
+For HTTP-forward and CONNECT requests, `req.destroy()` or `req.abort()` also cancels a pending connection to the proxy. This applies to long-lived helper agents: cancellation releases the pending socket without destroying the whole agent or affecting another queued request.
 
 ### TLS identity preservation
 
