@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.10 - Unreleased
+
 ## 0.3.9 - 2026-09-05
 
 **Highlights:** Destroying a pending HTTPS request now releases its stalled proxy connection immediately.
