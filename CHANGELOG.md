@@ -1,6 +1,10 @@
 # Changelog
 
-## 0.3.10 - Unreleased
+## 0.3.11 - Unreleased
+
+## 0.3.10 - 2026-09-06
+
+- Fixed runtime loading under Bun to use the installed Undici peer for fetch classes and dispatcher cleanup instead of Bun's built-in compatibility module.
 
 ## 0.3.9 - 2026-09-05
 
