@@ -25,6 +25,8 @@ npm install @openclaw/proxyline undici@^8.5.0
 
 Proxyline requires Node.js 22.19.0 or newer and a host `undici` version in the `>=8.5.0 <9` range. The package is ESM-only and includes TypeScript declarations.
 
+Proxyline resolves the installed Undici peer explicitly, including when loaded under Bun, so its fetch classes and dispatcher cleanup use the same implementation.
+
 ## Quick start
 
 Save this as `proxy.mjs`:
