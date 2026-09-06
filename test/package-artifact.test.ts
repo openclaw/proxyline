@@ -80,7 +80,9 @@ test("built runtime restores fetch globals in a relocated standalone bundle", as
       stdin: {
         contents: `
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import { installGlobalProxy } from ${JSON.stringify(path.join(repoRoot, "dist/index.js"))};
+assert.throws(() => createRequire(import.meta.url).resolve("undici/package.json"), { code: "MODULE_NOT_FOUND" });
 const keys = ["fetch", "Headers", "Request", "Response", "FormData"];
 const original = Object.fromEntries(keys.map(key => [key, globalThis[key]]));
 const proxy = installGlobalProxy({ mode: "managed", proxyUrl: "http://127.0.0.1:9" });
@@ -111,7 +113,8 @@ console.log(JSON.stringify({ response: "bundled", restored: true }));
     const relocated = path.join(relocatedRoot, "runtime.mjs");
     fs.renameSync(output, relocated);
     fs.rmSync(path.dirname(output), { recursive: true });
-    const result = spawnSync(process.execPath, [relocated], {
+    // Missing dependencies must not be installed during the relocation proof.
+    const result = spawnSync(process.execPath, [...(process.versions.bun ? ["--no-install"] : []), relocated], {
       cwd: relocatedRoot,
       encoding: "utf8",
       timeout: 30_000,
