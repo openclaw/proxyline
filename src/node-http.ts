@@ -573,9 +573,9 @@ class ProxylineHttpForwardAgent extends ProxylineRequestAgent {
           fail(new ProxylineError("CONNECT_FAILED", "proxy connection timed out"));
         }
       };
-      const onRequestClosed = (): void => {
+      const onRequestClosed = (error?: Error): void => {
         if (!settled) {
-          fail(new ProxylineError("CONNECT_FAILED", "request closed before proxy connection completed"));
+          fail(error ?? new ProxylineError("CONNECT_FAILED", "request closed before proxy connection completed"));
         }
       };
 
@@ -620,7 +620,7 @@ class ProxylineHttpForwardAgent extends ProxylineRequestAgent {
         originalRequestDestroy = request.destroy;
         hookedRequestDestroy = function hookedDestroy(this: http.ClientRequest, error?: Error) {
           const result = originalRequestDestroy?.call(this, error) ?? this;
-          onRequestClosed();
+          onRequestClosed(error);
           return result;
         };
         request.destroy = hookedRequestDestroy;
@@ -843,9 +843,9 @@ class ProxylineConnectAgent extends ProxylineRequestAgent {
       fail(new ProxylineError("CONNECT_FAILED", "proxy socket closed before CONNECT completed"));
     };
 
-    const onRequestClosed = (): void => {
+    const onRequestClosed = (error?: Error): void => {
       if (!settled) {
-        fail(new ProxylineError("CONNECT_FAILED", "request closed before proxy CONNECT completed"));
+        fail(error ?? new ProxylineError("CONNECT_FAILED", "request closed before proxy CONNECT completed"));
       }
     };
 
@@ -892,7 +892,7 @@ class ProxylineConnectAgent extends ProxylineRequestAgent {
       originalRequestDestroy = request.destroy;
       hookedRequestDestroy = function hookedDestroy(this: http.ClientRequest, error?: Error) {
         const result = originalRequestDestroy?.call(this, error) ?? this;
-        onRequestClosed();
+        onRequestClosed(error);
         return result;
       };
       request.destroy = hookedRequestDestroy;
