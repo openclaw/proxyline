@@ -252,6 +252,49 @@ class FakeProxySocket extends Duplex {
   }
 }
 
+for (const transport of ["forward", "connect"] as const) {
+  test(`pending ${transport} requests preserve caller destruction errors`, { timeout: 10_000 }, async () => {
+    const lab = await startProxyLab(
+      transport === "forward" ? { secureProxy: true } : { secureTarget: true },
+    );
+    const resolver: ProxyResolver = {
+      active: true,
+      describeProxy: () => lab.proxyUrl,
+      getProxyForUrl: () => lab.proxyUrl,
+      explain: () => { throw new Error("not used"); },
+    };
+    const agent = createNodeProxyAgent(resolver, lab.proxyCa, transport === "forward" ? "http" : "https");
+    let request: http.ClientRequest | undefined;
+    let watchdog: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const reason = Object.assign(new Error("synthetic caller cancellation"), { code: "SYNTHETIC_CANCEL" });
+      const errors: Error[] = [];
+      request = (transport === "forward" ? http : https).request(lab.targetUrl, {
+        agent,
+        ...(lab.targetCa ? { ca: lab.targetCa } : {}),
+      });
+      const activeRequest = request;
+      const closed = new Promise<void>((resolve) => activeRequest.once("close", resolve));
+      request.on("error", (error) => errors.push(error));
+      request.destroy(reason);
+      await Promise.race([
+        closed,
+        new Promise<never>((_, reject) => {
+          watchdog = setTimeout(() => reject(new Error("owned request did not close")), 5_000);
+        }),
+      ]);
+      assert.equal(errors.length, 1);
+      assert.equal(errors[0], reason);
+      assert.equal(lab.events.length, 0);
+    } finally {
+      clearTimeout(watchdog);
+      request?.destroy();
+      agent.destroy();
+      await lab.close();
+    }
+  });
+}
+
 test("ambient mode routes node:http through HTTP_PROXY", async () => {
   const lab = await startProxyLab();
   const proxy = withProxyEnv({ HTTP_PROXY: lab.proxyUrl }, () =>

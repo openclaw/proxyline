@@ -2,15 +2,23 @@ import http from "node:http";
 import https from "node:https";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { X509Certificate } from "node:crypto";
-import { createRequire } from "node:module";
 import net from "node:net";
-import path from "node:path";
 import tls from "node:tls";
-import type {
+// The explicit peer entry avoids Bun's builtin while remaining statically bundleable.
+import {
   Agent as UndiciAgent,
   Dispatcher,
+  FormData as UndiciFormData,
+  Headers as UndiciHeaders,
+  Pool as UndiciPool,
+  Request as UndiciRequest,
+  Response as UndiciResponse,
+  errors as undiciErrors,
+  fetch as undiciFetch,
+  getGlobalDispatcher,
   ProxyAgent as UndiciProxyAgent,
-} from "undici";
+  setGlobalDispatcher,
+} from "undici/index.js";
 import {
   createAmbientProxyResolver,
   EMPTY_PROXY_ENV,
@@ -42,25 +50,6 @@ import type {
   ProxylineUndiciOptions,
 } from "./types.js";
 import { PROXYLINE_DISPATCHER_BRAND } from "./dispatcher-brand.js";
-
-const require = createRequire(import.meta.url);
-// Resolve the installed peer so Bun uses the same fetch classes and dispatcher lifecycle.
-const {
-  Agent,
-  Dispatcher: UndiciDispatcher,
-  FormData: UndiciFormData,
-  Headers: UndiciHeaders,
-  Pool: UndiciPool,
-  Request: UndiciRequest,
-  Response: UndiciResponse,
-  errors: undiciErrors,
-  fetch: undiciFetch,
-  getGlobalDispatcher,
-  ProxyAgent,
-  setGlobalDispatcher,
-}: typeof import("undici") = require(
-  path.join(path.dirname(require.resolve("undici/package.json")), "index.js"),
-);
 
 type RuntimeInstall = {
   ambientEnv: ProxyEnvSnapshot | undefined;
@@ -426,7 +415,7 @@ type UndiciDispatcherOptions = Readonly<{
   proxyCa: string | undefined;
   undici: ProxylineUndiciOptions | undefined;
 }>;
-type UndiciProxyAgentOptions = Exclude<ConstructorParameters<typeof ProxyAgent>[0], string | URL>;
+type UndiciProxyAgentOptions = Exclude<ConstructorParameters<typeof UndiciProxyAgent>[0], string | URL>;
 type UndiciProxyClientFactory = NonNullable<
   UndiciProxyAgentOptions["clientFactory"]
 >;
@@ -473,7 +462,7 @@ function resolveUndiciBaseOptions(
 }
 
 function createUndiciAgent(options: ProxylineUndiciOptions | undefined): UndiciAgent {
-  return new Agent(resolveUndiciBaseOptions(options));
+  return new UndiciAgent(resolveUndiciBaseOptions(options));
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
@@ -541,13 +530,13 @@ function createUndiciProxyAgent(
         }
       : undefined;
   const dispatcherFactory = createProxyClientFactory();
-  return new ProxyAgent({
+  return new UndiciProxyAgent({
     ...resolveUndiciBaseOptions(options.undici),
     uri: proxyUrl,
     clientFactory: dispatcherFactory,
     factory: dispatcherFactory,
     ...(proxyTls !== undefined ? { proxyTls } : {}),
-  } as ConstructorParameters<typeof ProxyAgent>[0]);
+  } as ConstructorParameters<typeof UndiciProxyAgent>[0]);
 }
 
 function normalizeUndiciDispatchOptions(
@@ -594,7 +583,7 @@ function reportClosedDispatchError(
   throw error;
 }
 
-class ManagedUndiciDispatcher extends UndiciDispatcher {
+class ManagedUndiciDispatcher extends Dispatcher {
   public readonly [PROXYLINE_DISPATCHER_BRAND] = true;
   readonly #directDispatcher: UndiciAgent;
   readonly #dispatcherOptions: UndiciDispatcherOptions;
@@ -681,7 +670,7 @@ class ManagedUndiciDispatcher extends UndiciDispatcher {
   }
 }
 
-class AmbientUndiciDispatcher extends UndiciDispatcher {
+class AmbientUndiciDispatcher extends Dispatcher {
   public readonly [PROXYLINE_DISPATCHER_BRAND] = true;
   readonly #directDispatcher: UndiciAgent;
   readonly #dispatcherOptions: UndiciDispatcherOptions;
