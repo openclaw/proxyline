@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { build } from "esbuild";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -68,5 +69,66 @@ test("packed package includes sources and product docs referenced by metadata", 
         `${file} source is missing: ${source}`,
       );
     }
+  }
+});
+
+test("built runtime restores fetch globals in a relocated standalone bundle", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "proxyline-bundle-"));
+  try {
+    const output = path.join(root, "output", "runtime.mjs");
+    await build({
+      stdin: {
+        contents: `
+import assert from "node:assert/strict";
+import { installGlobalProxy } from ${JSON.stringify(path.join(repoRoot, "dist/index.js"))};
+const keys = ["fetch", "Headers", "Request", "Response", "FormData"];
+const original = Object.fromEntries(keys.map(key => [key, globalThis[key]]));
+const proxy = installGlobalProxy({ mode: "managed", proxyUrl: "http://127.0.0.1:9" });
+try {
+  assert.notEqual(globalThis.Response, original.Response);
+  assert.equal(await (await fetch("data:text/plain,bundled")).text(), "bundled");
+} finally {
+  proxy.stop();
+}
+for (const key of keys) assert.equal(globalThis[key], original[key]);
+await new Promise(resolve => setImmediate(resolve));
+console.log(JSON.stringify({ response: "bundled", restored: true }));
+`,
+        resolveDir: repoRoot,
+        sourcefile: "bundle-fixture.mjs",
+      },
+      bundle: true,
+      platform: "node",
+      format: "esm",
+      target: "node22",
+      outfile: output,
+      banner: {
+        js: 'import { createRequire as bundleRequire } from "node:module"; const require = bundleRequire(import.meta.url);',
+      },
+    });
+    const relocatedRoot = path.join(root, "relocated");
+    fs.mkdirSync(relocatedRoot);
+    const relocated = path.join(relocatedRoot, "runtime.mjs");
+    fs.renameSync(output, relocated);
+    fs.rmSync(path.dirname(output), { recursive: true });
+    const result = spawnSync(process.execPath, [relocated], {
+      cwd: relocatedRoot,
+      encoding: "utf8",
+      timeout: 30_000,
+      env: {
+        PATH: process.env.PATH,
+        SystemRoot: process.env.SystemRoot,
+        HOME: root,
+        USERPROFILE: root,
+        TMPDIR: root,
+        TEMP: root,
+        TMP: root,
+      },
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.equal(result.stderr, "");
+    assert.deepEqual(JSON.parse(result.stdout), { response: "bundled", restored: true });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });

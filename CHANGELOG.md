@@ -1,6 +1,10 @@
 # Changelog
 
-## 0.3.11 - Unreleased
+## 0.3.12 - Unreleased
+
+## 0.3.11 - 2026-09-06
+
+- Fixed standalone bundles by importing the installed Undici peer entrypoint statically, preserving Bun compatibility without requiring package metadata beside relocated output.
 
 ## 0.3.10 - 2026-09-06
 

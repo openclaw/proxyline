@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/proxyline",
-  "version": "0.3.10",
+  "version": "0.3.11",
   "description": "Process-global proxy routing for Node.js.",
   "type": "module",
   "license": "MIT",
@@ -64,6 +64,7 @@
   "devDependencies": {
     "@types/node": "26.4.1",
     "@types/ws": "8.18.1",
+    "esbuild": "0.28.2",
     "tsx": "4.23.13",
     "typescript": "^7.0.2",
     "undici": "8.10.1",
