@@ -1,6 +1,6 @@
 # API Reference
 
-Every public export, with the exact shape from `src/index.ts`, `src/connect.ts`, and `src/node-http.ts`.
+Every public export, with the exact shape from `src/index.ts`, `src/connect.ts`, `src/node-http.ts`, and `src/proxy-socket.ts`.
 
 ## Functions
 
@@ -45,6 +45,18 @@ const agent = createAmbientNodeProxyAgent({
   proxyTls: { caFile: "/etc/proxy-ca.pem" },
 });
 ```
+
+Supply `resolveProxyConnectOptions` when the application has already approved a
+proxy's DNS lookup or needs client certificates or an explicit TLS server name.
+The resolver receives the selected proxy URL as a string. Its returned properties
+are copied once per cached proxy URL and transport (HTTP-forward or CONNECT).
+Keep referenced certificate and key buffers unchanged for the agent's lifetime.
+Direct requests do not call the resolver. Treat the URL as sensitive when it
+contains proxy credentials; use `redactProxyUrl` before logging it.
+
+The resolver is synchronous: finish asynchronous policy checks and DNS planning
+before making the request. Request cancellation still belongs to the Node
+`ClientRequest`; destroy the request or agent to close pending connections.
 
 ### `redactProxyUrl(value: string | URL): string`
 
@@ -254,6 +266,7 @@ Returns `true` for Proxyline-owned managed and ambient undici dispatchers. Use t
 type OpenProxyConnectTunnelOptions = Readonly<{
   proxyUrl: string | URL;
   proxyTls?: ProxylineTlsOptions;
+  proxyConnect?: ProxyConnectOptions;
   targetHost: string;
   targetPort: number;
   timeoutMs?: number;
@@ -263,6 +276,7 @@ type OpenProxyConnectTunnelOptions = Readonly<{
 
 - `proxyUrl` — `http://` or `https://`. Userinfo becomes a `Proxy-Authorization: Basic` header.
 - `proxyTls` — CA trust for HTTPS proxies. See [Proxy TLS](./proxy-tls.md).
+- `proxyConnect` — prepared connection controls for this proxy hop; see below.
 - `targetHost` / `targetPort` — what to ask the proxy to connect to.
 - `timeoutMs` — overall budget for the CONNECT handshake. Defaults to `30000` when omitted. Pass `0` for no timeout.
 - `signal` — optional caller cancellation; aborting rejects the handshake and destroys its active proxy socket.
@@ -274,9 +288,32 @@ type AmbientNodeProxyAgentOptions = {
   env?: ProxyEnvSnapshot;
   protocol?: "http" | "https";
   proxyTls?: ProxylineTlsOptions;
+  resolveProxyConnectOptions?: (proxyUrl: string) => ProxyConnectOptions;
 };
 ```
 
 - `env` — optional env snapshot. Defaults to reading process env.
 - `protocol` — probe protocol, defaulting to `"https"`.
 - `proxyTls` — CA trust for HTTPS proxy endpoints. See [Proxy TLS](./proxy-tls.md).
+- `resolveProxyConnectOptions` — resolves prepared connection controls for each cached proxy child agent.
+
+### `ProxyConnectOptions`
+
+```ts
+type ProxyConnectOptions = Readonly<
+  Pick<net.TcpNetConnectOpts, "lookup"> &
+  Pick<tls.ConnectionOptions,
+    "ca" | "cert" | "key" | "passphrase" | "servername" | "rejectUnauthorized">
+>;
+```
+
+- `lookup` resolves only the proxy hostname. It never resolves the destination
+  named in a CONNECT request.
+- TLS fields apply only to an HTTPS proxy. `ca` takes precedence over the
+  existing `proxyTls.ca`/`caFile` default. Other TLS fields keep Node's defaults
+  when omitted; destination TLS remains request-owned.
+- The proxy URL always owns the socket host and port. Extra JavaScript properties
+  such as `host`, `port`, `path`, `socket`, or `ALPNProtocols` are ignored.
+  HTTPS proxy connections negotiate HTTP/1.1.
+- No operation signal is cached in these options. Node request cancellation and
+  `openProxyConnectTunnel`'s existing handshake signal keep their own lifetimes.

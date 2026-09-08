@@ -77,6 +77,8 @@ Managed mode supports deliberate direct-routing exceptions. A `bypassPolicy` han
 
 For an HTTPS proxy with a private CA, use `proxyTls.ca` or `proxyTls.caFile`. That trust applies only to the proxy connection; destination TLS validation remains separate. See [Proxy TLS](./docs/proxy-tls.md).
 
+Standalone Node helper agents support prepared DNS lookups and proxy client certificates through `createAmbientNodeProxyAgent({ resolveProxyConnectOptions })`. Raw CONNECT callers pass the same controls through `proxyConnect`. The selected proxy URL retains ownership of the connection host and port. See [the connection controls](./docs/api-reference.md#proxyconnectoptions).
+
 ## Observability and lifecycle
 
 `proxy.explain(url)` reports `proxied` or `direct`, the reason, the surface, and a credential-redacted proxy URL when one applies. The optional `onEvent` callback receives installation, shutdown, and decision events.

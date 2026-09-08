@@ -2,6 +2,9 @@
 
 ## 0.3.12 - Unreleased
 
+- Added prepared proxy DNS lookups and proxy-specific TLS controls to Node helper agents and raw CONNECT tunnels, including client certificates and explicit server names.
+- Unified proxy socket creation while preserving URL-owned routing, independent destination TLS, and existing request cancellation.
+
 ## 0.3.11 - 2026-09-06
 
 - Fixed standalone bundles by importing the installed Undici peer entrypoint statically, preserving Bun compatibility without requiring package metadata beside relocated output.

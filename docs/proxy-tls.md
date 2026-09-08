@@ -61,6 +61,18 @@ const ca = resolveProxyTlsCa({ caFile: "/etc/proxy-ca.pem" });
 // ca is a PEM string, or undefined if no options were supplied
 ```
 
+## Per-proxy connection controls
+
+For a Node helper agent, `resolveProxyConnectOptions(proxyUrl)` can return a
+prepared DNS `lookup`, proxy client `cert`/`key`/`passphrase`, a TLS `servername`,
+`rejectUnauthorized`, and `ca`. Raw CONNECT callers pass the same fields through
+`proxyConnect`. See [the API contract](./api-reference.md#proxyconnectoptions).
+
+These fields configure the proxy hop. They cannot replace the proxy URL's host
+or port, inject a Unix socket path, or change the HTTP/1.1 proxy protocol. An
+explicit `ca` overrides the existing proxy CA default; it does not change trust
+for the tunneled destination.
+
 ## Destination TLS
 
 Destination TLS is independent of `proxyTls`. When you call `https.request(url, { ca, rejectUnauthorized, ... })`, those options apply to the destination handshake exactly as Node would normally apply them. Proxyline only lifts them off a caller-supplied `agent` so they survive the agent replacement; see [Surfaces — TLS identity preservation](./surfaces.md#tls-identity-preservation).

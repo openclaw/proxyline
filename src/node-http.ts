@@ -9,7 +9,8 @@ import {
   type ProxyEnvSnapshot,
 } from "./env.js";
 import { formatConnectAuthority, resolveProxyConnectTimeoutMs } from "./connect.js";
-import { ProxylineError, decodeProxyUserinfoComponent, resolveProxyTlsCa, type ProxylineTlsOptions } from "./shared.js";
+import { connectToProxy, type ProxyConnectOptions } from "./proxy-socket.js";
+import { ProxylineError, decodeProxyUserinfoComponent, type ProxylineTlsOptions } from "./shared.js";
 import type { ProxylineSurface, ProxyResolver } from "./types.js";
 
 export type NodeHttpRequestOptions = http.RequestOptions & https.RequestOptions & {
@@ -19,6 +20,7 @@ export type NodeHttpRequestOptions = http.RequestOptions & https.RequestOptions 
 type NodeHttpMethod = typeof http.request;
 type NodeAgentFactory = (options: NodeHttpRequestOptions) => http.Agent;
 type NodeAgentOptions = http.AgentOptions & https.AgentOptions;
+type ResolveProxyConnectOptions = (proxyUrl: string) => ProxyConnectOptions;
 const pendingRequestSymbol = Symbol("proxyline.pendingRequest");
 type NodeAgentRequestOptions = http.RequestOptions & https.RequestOptions & {
   secureEndpoint?: boolean;
@@ -51,6 +53,7 @@ type NodeProxyAgentOptions = NodeAgentOptions & {
     request?: http.ClientRequest,
   ) => string;
   proxyTls?: ProxylineTlsOptions;
+  resolveProxyConnectOptions?: ResolveProxyConnectOptions;
 };
 
 const MAX_CONNECT_RESPONSE_HEADER_BYTES = 16 * 1024;
@@ -193,17 +196,6 @@ export function bindNodeHttpMethod<TMethod extends NodeHttpMethod>(
   }) as TMethod;
 }
 
-function proxyHost(proxy: URL): string {
-  return (proxy.hostname || proxy.host).replace(/^\[|\]$/g, "");
-}
-
-function proxyPort(proxy: URL): number {
-  if (proxy.port) {
-    return Number(proxy.port);
-  }
-  return proxy.protocol === "https:" ? 443 : 80;
-}
-
 function proxyAuthorization(proxy: URL): string | undefined {
   if (!proxy.username && !proxy.password) {
     return undefined;
@@ -211,27 +203,6 @@ function proxyAuthorization(proxy: URL): string | undefined {
   const username = decodeProxyUserinfoComponent(proxy.username);
   const password = decodeProxyUserinfoComponent(proxy.password);
   return `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
-}
-
-function proxyConnectOptions(
-  proxy: URL,
-  proxyTls: ProxylineTlsOptions | undefined,
-): net.TcpNetConnectOpts | tls.ConnectionOptions {
-  const host = proxyHost(proxy);
-  const base = {
-    host,
-    port: proxyPort(proxy),
-  };
-  if (proxy.protocol !== "https:") {
-    return base;
-  }
-  const ca = resolveProxyTlsCa(proxyTls);
-  return {
-    ...base,
-    ALPNProtocols: ["http/1.1"],
-    ...(net.isIP(host) === 0 ? { servername: host } : {}),
-    ...(ca !== undefined ? { ca } : {}),
-  };
 }
 
 function assertSupportedNodeProxyProtocol(proxy: URL): void {
@@ -312,16 +283,6 @@ function setForwardProxyRequestPath(
 ): void {
   req._header = null;
   req.path = proxyForwardRequestPath(req, options);
-}
-
-function connectToProxy(
-  proxy: URL,
-  proxyTls: ProxylineTlsOptions | undefined,
-): net.Socket | tls.TLSSocket {
-  const options = proxyConnectOptions(proxy, proxyTls);
-  return proxy.protocol === "https:"
-    ? tls.connect(options as tls.ConnectionOptions)
-    : net.connect(options as net.NetConnectOpts);
 }
 
 function isWebSocketRequest(req: http.ClientRequest): boolean {
@@ -457,13 +418,15 @@ class ProxylineHttpForwardAgent extends ProxylineRequestAgent {
   readonly #pendingConnectSockets = new Set<net.Socket>();
   readonly #proxy: URL;
   readonly #proxyTls: ProxylineTlsOptions | undefined;
+  readonly #proxyConnect: ProxyConnectOptions;
 
-  public constructor(proxy: URL, options: NodeAgentOptions, proxyTls: ProxylineTlsOptions | undefined) {
+  public constructor(proxy: URL, options: NodeAgentOptions, proxyTls: ProxylineTlsOptions | undefined, proxyConnect: ProxyConnectOptions) {
     super(options);
     this.options = options;
     this.#keepAlive = options.keepAlive === true;
     this.#proxy = proxy;
     this.#proxyTls = proxyTls;
+    this.#proxyConnect = proxyConnect;
   }
 
   public override addRequest(req: http.ClientRequest, options: NodeAgentRequestOptions): void {
@@ -477,7 +440,7 @@ class ProxylineHttpForwardAgent extends ProxylineRequestAgent {
     callback?: (error: Error | null, socket: net.Socket) => void,
   ): net.Socket {
     const request = this.takePendingRequest(options);
-    const socket = connectToProxy(this.#proxy, this.#proxyTls);
+    const socket = connectToProxy(this.#proxy, this.#proxyTls, this.#proxyConnect);
     // When Node supplies an async callback, deliver the socket only through that
     // path. Returning the same socket as well double-invokes Agent setup and can
     // hand an unready TLS proxy socket to plain HTTP forward traffic.
@@ -651,13 +614,15 @@ class ProxylineConnectAgent extends ProxylineRequestAgent {
   readonly #pendingConnectSockets = new Set<net.Socket>();
   readonly #proxy: URL;
   readonly #proxyTls: ProxylineTlsOptions | undefined;
+  readonly #proxyConnect: ProxyConnectOptions;
 
-  public constructor(proxy: URL, options: NodeAgentOptions, proxyTls: ProxylineTlsOptions | undefined) {
+  public constructor(proxy: URL, options: NodeAgentOptions, proxyTls: ProxylineTlsOptions | undefined, proxyConnect: ProxyConnectOptions) {
     super(options);
     this.options = options;
     this.#keepAlive = options.keepAlive === true;
     this.#proxy = proxy;
     this.#proxyTls = proxyTls;
+    this.#proxyConnect = proxyConnect;
   }
 
   public override createConnection(
@@ -669,7 +634,7 @@ class ProxylineConnectAgent extends ProxylineRequestAgent {
       throw new ProxylineError("INVALID_CONNECT_CALLBACK", "CONNECT agents require an async socket callback.");
     }
 
-    const proxySocket = connectToProxy(this.#proxy, this.#proxyTls);
+    const proxySocket = connectToProxy(this.#proxy, this.#proxyTls, this.#proxyConnect);
     this.#pendingConnectSockets.add(proxySocket);
     let pendingTimeout: ReturnType<typeof setTimeout> | undefined;
     let settled = false;
@@ -934,9 +899,10 @@ export class ProxylineNodeProxyAgent extends http.Agent {
   readonly #httpAgent: NodeAddRequestAgent;
   readonly #httpsAgent: NodeAddRequestAgent;
   readonly #proxyTls: ProxylineTlsOptions | undefined;
+  readonly #resolveProxyConnectOptions: ResolveProxyConnectOptions | undefined;
 
   public constructor(options: NodeProxyAgentOptions) {
-    const { defaultProtocol = "http", getProxyForUrl, proxyTls, ...agentOptions } = options;
+    const { defaultProtocol = "http", getProxyForUrl, proxyTls, resolveProxyConnectOptions, ...agentOptions } = options;
     super(agentOptions);
     if (nodeAgentDefaultPorts.get(this) === 80) {
       nodeAgentDefaultPorts.delete(this);
@@ -945,6 +911,7 @@ export class ProxylineNodeProxyAgent extends http.Agent {
     this.#defaultProtocol = defaultProtocol;
     this.#getProxyForUrl = getProxyForUrl;
     this.#proxyTls = proxyTls;
+    this.#resolveProxyConnectOptions = resolveProxyConnectOptions;
     this.#httpAgent = new http.Agent(agentOptions) as NodeAddRequestAgent;
     this.#httpsAgent = new https.Agent(agentOptions) as unknown as NodeAddRequestAgent;
   }
@@ -1025,9 +992,12 @@ export class ProxylineNodeProxyAgent extends http.Agent {
     const key = `${tunnel ? "connect" : "forward"}:${proxyUrl.href}`;
     let agent = this.#agents.get(key);
     if (agent === undefined) {
+      // Each cached child owns a snapshot; later mutation of the caller's
+      // options cannot change an already-selected proxy connection policy.
+      const proxyConnect = { ...this.#resolveProxyConnectOptions?.(proxyUrl.href) };
       const newAgent = tunnel
-        ? new ProxylineConnectAgent(proxyUrl, this.options, this.#proxyTls)
-        : new ProxylineHttpForwardAgent(proxyUrl, this.options, this.#proxyTls);
+        ? new ProxylineConnectAgent(proxyUrl, this.options, this.#proxyTls, proxyConnect)
+        : new ProxylineHttpForwardAgent(proxyUrl, this.options, this.#proxyTls, proxyConnect);
       agent = newAgent;
       this.#agents.set(key, agent);
     }
@@ -1067,6 +1037,7 @@ export type AmbientNodeProxyAgentOptions = {
   env?: ProxyEnvSnapshot;
   protocol?: "http" | "https";
   proxyTls?: ProxylineTlsOptions;
+  resolveProxyConnectOptions?: ResolveProxyConnectOptions;
 };
 
 function ambientProbeUrl(protocol: "http" | "https"): string {
@@ -1093,5 +1064,8 @@ export function createAmbientNodeProxyAgent(
     defaultProtocol: protocol,
     getProxyForUrl: (url) => resolveAmbientProxyForUrl(url, env) ?? "",
     ...(options.proxyTls !== undefined ? { proxyTls: options.proxyTls } : {}),
+    ...(options.resolveProxyConnectOptions !== undefined
+      ? { resolveProxyConnectOptions: options.resolveProxyConnectOptions }
+      : {}),
   });
 }

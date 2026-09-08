@@ -1,4 +1,5 @@
 export { openProxyConnectTunnel, type OpenProxyConnectTunnelOptions } from "./connect.js";
+export type { ProxyConnectOptions } from "./proxy-socket.js";
 export {
   createAmbientNodeProxyAgent,
   hasAmbientNodeProxyConfigured,
