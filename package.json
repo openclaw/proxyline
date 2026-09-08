@@ -67,7 +67,7 @@
     "esbuild": "0.28.2",
     "tsx": "4.23.13",
     "typescript": "^7.0.2",
-    "undici": "8.10.1",
+    "undici": "8.10.2",
     "ws": "8.21.3"
   },
   "engines": {
