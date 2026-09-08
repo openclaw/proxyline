@@ -132,6 +132,25 @@ async function readHttpsOptions(
   });
 }
 
+function pinnedProxyLookup(expectedHostname: string): net.LookupFunction {
+  return (hostname, options, callback) => {
+    assert.equal(hostname, expectedHostname);
+    callback(null, options.all ? [{ address: "127.0.0.1", family: 4 }] : "127.0.0.1", 4);
+  };
+}
+
+async function readProxyTunnel(socket: net.Socket, target: URL): Promise<string> {
+  return await new Promise<string>((resolve, reject) => {
+    let response = "";
+    socket.setEncoding("utf8");
+    socket.setTimeout(2_000, () => socket.destroy(new Error("tunneled response timed out")));
+    socket.on("data", (chunk: string) => { response += chunk; });
+    socket.once("error", reject);
+    socket.once("end", () => resolve(response));
+    socket.write(`GET /allowed HTTP/1.1\r\nHost: ${target.host}\r\nConnection: close\r\n\r\n`);
+  });
+}
+
 async function withConnectRecorder<T>(
   run: (proxyUrl: string, authorities: string[]) => Promise<T>,
 ): Promise<T> {
@@ -1308,6 +1327,233 @@ test("ambient Node proxy helper trusts HTTPS proxy endpoints with scoped proxy T
     await lab.close();
   }
 });
+
+for (const protocol of ["http", "https"] as const) {
+  test(`proxy connection controls pin proxy DNS and retain cached ${protocol} options`, { timeout: 15_000 }, async () => {
+    const lab = await startProxyLab({ secureTarget: protocol === "https" });
+    const proxyUrl = new URL(lab.proxyUrl);
+    proxyUrl.hostname = "pinned-proxy.invalid";
+    const controls = { lookup: pinnedProxyLookup(proxyUrl.hostname) };
+    const resolvedProxies: string[] = [];
+    const agent = withProxyEnv({ HTTP_PROXY: proxyUrl.href, HTTPS_PROXY: proxyUrl.href }, () =>
+      createAmbientNodeProxyAgent({
+        protocol,
+        resolveProxyConnectOptions: (selectedProxy: string) => {
+          resolvedProxies.push(selectedProxy);
+          return controls;
+        },
+      }),
+    );
+    try {
+      assert.ok(agent);
+      const read = () => protocol === "https"
+        ? readHttps(`${lab.targetUrl}/allowed`, { agent, ca: lab.targetCa })
+        : readHttp(`${lab.targetUrl}/allowed`, agent);
+      assert.deepEqual(await read(), { status: 200, body: "allowed via target\n" });
+      controls.lookup = () => { throw new Error("returned proxy options were mutated"); };
+      assert.deepEqual(await read(), { status: 200, body: "allowed via target\n" });
+      assert.deepEqual(resolvedProxies, [proxyUrl.href]);
+      assert.equal(lab.events.filter((event) => event.type === (protocol === "https" ? "connect" : "request")).length, 2);
+    } finally {
+      agent?.destroy();
+      await lab.close();
+    }
+  });
+}
+
+test("proxy connection controls keep two proxy policies separate in one cached agent", { timeout: 15_000 }, async () => {
+  const forward = await startProxyLab({
+    secureProxy: true,
+    proxyHost: "127.0.0.1",
+    proxyCertificateNames: { dnsNames: ["forward-proxy.invalid"], ipAddresses: [] },
+  });
+  try {
+    const tunnel = await startProxyLab({
+      secureProxy: true,
+      proxyHost: "127.0.0.1",
+      proxyCertificateNames: { dnsNames: ["tunnel-proxy.invalid"], ipAddresses: [] },
+      secureTarget: true,
+    });
+    const forwardUrl = new URL(forward.proxyUrl);
+    forwardUrl.hostname = "forward-proxy.invalid";
+    const tunnelUrl = new URL(tunnel.proxyUrl);
+    tunnelUrl.hostname = "tunnel-proxy.invalid";
+    const forwardControls = { lookup: pinnedProxyLookup(forwardUrl.hostname), ca: forward.proxyCa, rejectUnauthorized: true };
+    const tunnelControls = { lookup: pinnedProxyLookup(tunnelUrl.hostname), ca: tunnel.proxyCa, rejectUnauthorized: true };
+    const resolvedProxies: string[] = [];
+    const agent = withProxyEnv({ HTTP_PROXY: forwardUrl.href, HTTPS_PROXY: tunnelUrl.href }, () =>
+      createAmbientNodeProxyAgent({
+        resolveProxyConnectOptions: (selectedProxy: string) => {
+          resolvedProxies.push(selectedProxy);
+          if (selectedProxy === forwardUrl.href) return forwardControls;
+          assert.equal(selectedProxy, tunnelUrl.href);
+          return tunnelControls;
+        },
+      }),
+    );
+    try {
+      assert.ok(agent);
+      const expected = { status: 200, body: "allowed via target\n" };
+      assert.deepEqual(await readHttp(`${forward.targetUrl}/allowed`, agent), expected);
+      assert.deepEqual(await readHttps(`${tunnel.targetUrl}/allowed`, { agent, ca: tunnel.targetCa }), expected);
+      forwardControls.ca = tunnel.proxyCa;
+      tunnelControls.ca = forward.proxyCa;
+      assert.deepEqual(await readHttps(`${tunnel.targetUrl}/allowed`, { agent, ca: tunnel.targetCa }), expected);
+      assert.deepEqual(await readHttp(`${forward.targetUrl}/allowed`, agent), expected);
+      assert.deepEqual(resolvedProxies, [forwardUrl.href, tunnelUrl.href]);
+      assert.equal(forward.events.filter((event) => event.type === "request").length, 2);
+      assert.equal(tunnel.events.filter((event) => event.type === "connect").length, 2);
+    } finally {
+      agent?.destroy();
+      await tunnel.close();
+    }
+  } finally {
+    await forward.close();
+  }
+});
+
+test("proxy connection controls pin raw tunnel DNS without accepting routing overrides", { timeout: 15_000 }, async () => {
+  const lab = await startProxyLab();
+  const proxyUrl = new URL(lab.proxyUrl);
+  proxyUrl.hostname = "pinned-proxy.invalid";
+  const target = new URL(lab.targetUrl);
+  const controls = {
+    lookup: pinnedProxyLookup(proxyUrl.hostname),
+    host: "wrong-proxy.invalid",
+    hostname: "wrong-proxy.invalid",
+    port: 1,
+    path: "/not-a-proxy-socket",
+  };
+  try {
+    const socket = await openProxyConnectTunnel({
+      proxyUrl,
+      proxyConnect: controls,
+      targetHost: target.hostname,
+      targetPort: Number(target.port),
+      timeoutMs: 2_000,
+    });
+    try {
+      const response = await readProxyTunnel(socket, target);
+      assert.match(response, /^HTTP\/1\.1 200 OK/m);
+      assert.match(response, /allowed via target/);
+      assert.ok(lab.events.some((event) => event.type === "connect" && event.authority === target.host));
+    } finally {
+      socket.destroy();
+    }
+  } finally {
+    await lab.close();
+  }
+});
+
+for (const scenario of [
+  { name: "preserve the disabled Node default when verification is omitted", env: "0", rejectUnauthorized: undefined, allowed: true },
+  { name: "honor explicit verification over the disabled Node default", env: "0", rejectUnauthorized: true, allowed: false },
+  { name: "honor explicitly disabled verification over the Node default", env: undefined, rejectUnauthorized: false, allowed: true },
+  { name: "preserve the secure Node default when verification is omitted", env: undefined, rejectUnauthorized: undefined, allowed: false },
+] as const) {
+  test(`proxy connection controls ${scenario.name}`, { timeout: 15_000 }, async () => {
+    const lab = await startProxyLab({ secureProxy: true });
+    const previous = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    const agent = withProxyEnv({ HTTP_PROXY: lab.proxyUrl }, () =>
+      createAmbientNodeProxyAgent({
+        protocol: "http",
+        resolveProxyConnectOptions: () => scenario.rejectUnauthorized === undefined
+          ? {}
+          : { rejectUnauthorized: scenario.rejectUnauthorized },
+      }),
+    );
+    try {
+      if (scenario.env === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+      else process.env.NODE_TLS_REJECT_UNAUTHORIZED = scenario.env;
+      assert.ok(agent);
+      const response = readHttp(`${lab.targetUrl}/allowed`, agent);
+      if (scenario.allowed) {
+        assert.deepEqual(await response, { status: 200, body: "allowed via target\n" });
+      } else {
+        await assert.rejects(response, /self.signed certificate|unable to verify/i);
+      }
+    } finally {
+      if (previous === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+      else process.env.NODE_TLS_REJECT_UNAUTHORIZED = previous;
+      agent?.destroy();
+      await lab.close();
+    }
+  });
+}
+
+for (const transport of ["http", "https", "raw"] as const) {
+  test(`proxy connection controls preserve proxy mTLS, SNI, and URL routing for ${transport}`, { timeout: 15_000 }, async () => {
+    const passphrase = "proxyline synthetic client key";
+    const client = await createProxyTestCertificate({ extendedKeyUsage: "clientAuth", passphrase });
+    try {
+      const lab = await startProxyLab({
+        secureProxy: true,
+        proxyHost: "127.0.0.1",
+        proxyClientCa: client.certificate,
+        proxyCertificateNames: { dnsNames: ["proxy-identity.example"], ipAddresses: [] },
+        secureTarget: transport === "https",
+      });
+      const proxyUrl = new URL(lab.proxyUrl);
+      proxyUrl.hostname = "pinned-proxy.invalid";
+      assert.ok(lab.proxyCa);
+      const controls = {
+        lookup: pinnedProxyLookup(proxyUrl.hostname),
+        ca: lab.proxyCa,
+        cert: client.certificate,
+        key: client.privateKey,
+        passphrase,
+        servername: "proxy-identity.example",
+        host: "wrong-proxy.invalid",
+        hostname: "wrong-proxy.invalid",
+        port: 1,
+        path: "/not-a-proxy-socket",
+        ALPNProtocols: ["h2"],
+      };
+      let agent: ReturnType<typeof createAmbientNodeProxyAgent>;
+      try {
+        if (transport === "raw") {
+          const target = new URL(lab.targetUrl);
+          const socket = await openProxyConnectTunnel({
+            proxyUrl,
+            proxyConnect: controls,
+            targetHost: target.hostname,
+            targetPort: Number(target.port),
+            timeoutMs: 2_000,
+          });
+          try {
+            assert.ok(socket instanceof tls.TLSSocket);
+            assert.equal(socket.authorized, true);
+            assert.equal(socket.alpnProtocol, "http/1.1");
+            assert.match(await readProxyTunnel(socket, target), /allowed via target/);
+          } finally {
+            socket.destroy();
+          }
+        } else {
+          agent = withProxyEnv({ HTTP_PROXY: proxyUrl.href, HTTPS_PROXY: proxyUrl.href }, () =>
+            createAmbientNodeProxyAgent({
+              protocol: transport,
+              resolveProxyConnectOptions: (selectedProxy: string) => {
+                assert.equal(selectedProxy, proxyUrl.href);
+                return controls;
+              },
+            }),
+          );
+          assert.ok(agent);
+          const response = transport === "https"
+            ? await readHttps(`${lab.targetUrl}/allowed`, { agent, ca: lab.targetCa })
+            : await readHttp(`${lab.targetUrl}/allowed`, agent);
+          assert.deepEqual(response, { status: 200, body: "allowed via target\n" });
+        }
+        assert.ok(lab.events.some((event) => event.type === "proxy_sni" && event.servername === "proxy-identity.example"));
+      } finally {
+        agent?.destroy();
+        await lab.close();
+      }
+    } finally {
+      await client.cleanup();
+    }
+  });
+}
 
 test("ambient Node proxy helper routes HTTP callers even when probing HTTPS by default", async () => {
   const lab = await startProxyLab();

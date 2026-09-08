@@ -1,10 +1,12 @@
 import net from "node:net";
 import tls from "node:tls";
-import { ProxylineError, decodeProxyUserinfoComponent, type ProxylineTlsOptions, redactProxyUrl, resolveProxyTlsCa } from "./shared.js";
+import { connectToProxy, type ProxyConnectOptions } from "./proxy-socket.js";
+import { ProxylineError, decodeProxyUserinfoComponent, type ProxylineTlsOptions, redactProxyUrl } from "./shared.js";
 
 export type OpenProxyConnectTunnelOptions = Readonly<{
   proxyUrl: string | URL;
   proxyTls?: ProxylineTlsOptions;
+  proxyConnect?: ProxyConnectOptions;
   targetHost: string;
   targetPort: number;
   /**
@@ -37,17 +39,6 @@ const INVALID_CONNECT_HOST_DELIMITER_PATTERN = /[/:?#@\\]/;
 
 type ProxySocket = net.Socket | tls.TLSSocket;
 
-function resolveProxyHost(proxy: URL): string {
-  return (proxy.hostname || proxy.host).replace(/^\[|\]$/g, "");
-}
-
-function resolveProxyPort(proxy: URL): number {
-  if (proxy.port) {
-    return Number(proxy.port);
-  }
-  return proxy.protocol === "https:" ? 443 : 80;
-}
-
 function resolveProxyAuthorization(proxy: URL): string | undefined {
   if (!proxy.username && !proxy.password) {
     return undefined;
@@ -78,31 +69,6 @@ export function formatConnectAuthority(targetHost: string, targetPort: number): 
     throw new ProxylineError("INVALID_CONNECT_TARGET", "CONNECT target host is not a host name.");
   }
   return `${targetHost}:${targetPort}`;
-}
-
-function connectToProxy(proxy: URL, proxyTls: ProxylineTlsOptions | undefined): ProxySocket {
-  const host = resolveProxyHost(proxy);
-  const connectOptions = {
-    host,
-    port: resolveProxyPort(proxy),
-  };
-  if (proxy.protocol === "https:") {
-    const ca = resolveProxyTlsCa(proxyTls);
-    const servername = net.isIP(host) === 0 ? host : undefined;
-    return tls.connect({
-      ...connectOptions,
-      ALPNProtocols: ["http/1.1"],
-      ...(servername !== undefined ? { servername } : {}),
-      ...(ca !== undefined ? { ca } : {}),
-    });
-  }
-  if (proxy.protocol === "http:") {
-    return net.connect(connectOptions);
-  }
-  throw new ProxylineError(
-    "UNSUPPORTED_PROXY_PROTOCOL",
-    `CONNECT tunnels support http:// and https:// proxy endpoints: ${proxy.protocol}`,
-  );
 }
 
 function assertSupportedConnectProxyProtocol(proxy: URL): void {
@@ -245,7 +211,7 @@ export async function openProxyConnectTunnel(
           fail(new Error(`proxy CONNECT timed out after ${connectTimeoutMs}ms`));
         }, connectTimeoutMs);
       }
-      socket = connectToProxy(proxy, options.proxyTls);
+      socket = connectToProxy(proxy, options.proxyTls, options.proxyConnect);
       socket.once(proxy.protocol === "https:" ? "secureConnect" : "connect", onConnected);
       socket.on("data", onData);
       socket.once("error", onError);

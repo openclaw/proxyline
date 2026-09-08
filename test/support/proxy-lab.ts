@@ -11,6 +11,11 @@ export type ProxyLabOptions = {
   requiredProxyAuthorization?: string;
   secureProxy?: boolean;
   secureTarget?: boolean;
+  proxyClientCa?: string;
+  proxyCertificateNames?: {
+    dnsNames?: string[];
+    ipAddresses?: string[];
+  };
   targetHost?: "127.0.0.1" | "localhost";
   targetCertificateNames?: {
     dnsNames?: string[];
@@ -364,12 +369,17 @@ export async function startProxyLab(options: ProxyLabOptions = {}): Promise<Prox
     });
   };
 
-  const proxyCertificate = options.secureProxy ? await createProxyTestCertificate() : undefined;
+  const proxyCertificate = options.secureProxy
+    ? await createProxyTestCertificate(options.proxyCertificateNames)
+    : undefined;
   const proxy = options.secureProxy
     ? https.createServer(
         {
           cert: proxyCertificate?.certificate,
           key: proxyCertificate?.privateKey,
+          ...(options.proxyClientCa !== undefined
+            ? { ca: options.proxyClientCa, requestCert: true, rejectUnauthorized: true }
+            : {}),
           SNICallback: (servername, callback) => {
             events.push({ type: "proxy_sni", servername });
             callback(
@@ -377,6 +387,7 @@ export async function startProxyLab(options: ProxyLabOptions = {}): Promise<Prox
               tls.createSecureContext({
                 cert: proxyCertificate?.certificate,
                 key: proxyCertificate?.privateKey,
+                ...(options.proxyClientCa !== undefined ? { ca: options.proxyClientCa } : {}),
               }),
             );
           },

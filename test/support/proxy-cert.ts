@@ -15,6 +15,8 @@ export type ProxyTestCertificate = {
 export type ProxyTestCertificateOptions = {
   dnsNames?: string[];
   ipAddresses?: string[];
+  extendedKeyUsage?: "serverAuth" | "clientAuth";
+  passphrase?: string;
 };
 
 function buildSubjectAltNames(options: ProxyTestCertificateOptions): string {
@@ -39,7 +41,7 @@ prompt = no
 CN = Proxyline Test Proxy
 [v3_req]
 keyUsage = critical, digitalSignature, keyEncipherment
-extendedKeyUsage = serverAuth
+extendedKeyUsage = ${options.extendedKeyUsage ?? "serverAuth"}
 subjectAltName = @alt_names
 [alt_names]
 ${buildSubjectAltNames(options)}
@@ -61,7 +63,7 @@ export async function createProxyTestCertificate(
       "-x509",
       "-newkey",
       "rsa:2048",
-      "-nodes",
+      ...(options.passphrase === undefined ? ["-nodes"] : ["-passout", `pass:${options.passphrase}`]),
       "-days",
       "1",
       "-keyout",
