@@ -24,8 +24,8 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
       undici:
-        specifier: 8.10.1
-        version: 8.10.1
+        specifier: 8.10.2
+        version: 8.10.2
       ws:
         specifier: 8.21.3
         version: 8.21.3
@@ -337,8 +337,8 @@ packages:
   undici-types@8.3.0:
     resolution: {integrity: sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ==}
 
-  undici@8.10.1:
-    resolution: {integrity: sha512-YQ3WlbqjYMmNpdvDH64jAgLjxuAR9+649calDWhbshYaeQGO2bR4nI94ORJmwI3J9YhoKQnpyGOK+0zlWS5N5Q==}
+  undici@8.10.2:
+    resolution: {integrity: sha512-/y4/bH9YNU5hi9NIrpOuvGXFcxrj3CMrV+/AYpowAYTpHn8gX/XPFjNy766FPoYY0miQhdW977JFWKGNhBdwyQ==}
     engines: {node: '>=22.19.0'}
 
   ws@8.21.3:
@@ -564,6 +564,6 @@ snapshots:
 
   undici-types@8.3.0: {}
 
-  undici@8.10.1: {}
+  undici@8.10.2: {}
 
   ws@8.21.3: {}
