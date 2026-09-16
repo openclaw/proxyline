@@ -1244,6 +1244,21 @@ test("node CONNECT agent fails requests when destination TLS closes during hands
   }
 });
 
+test("node CONNECT agent reports invalid destination TLS options as a request error", { timeout: 5_000 }, async () => {
+  const lab = await startProxyLab({ secureTarget: true });
+  const proxy = installGlobalProxy({ mode: "managed", proxyUrl: lab.proxyUrl });
+  try {
+    await assert.rejects(
+      readHttps(lab.targetUrl, { ciphers: "not-a-real-cipher" }),
+      { code: "ERR_SSL_NO_CIPHER_MATCH" },
+    );
+    assert.ok(lab.events.some((event) => event.type === "connect"));
+  } finally {
+    proxy.stop();
+    await lab.close();
+  }
+});
+
 test("node CONNECT agent detaches its parser before destination TLS", async () => {
   const netMutable = net as unknown as { connect: (...args: unknown[]) => net.Socket };
   const tlsMutable = tls as unknown as { connect: (...args: unknown[]) => tls.TLSSocket };
@@ -2658,6 +2673,47 @@ test("node CONNECT agents emit invalid proxy userinfo as a request error", async
     await lab.close();
   }
 });
+
+for (const consumption of ["data events", "async iteration"] as const) {
+  test(`CONNECT helper preserves early tunnel bytes for ${consumption}`, { timeout: 5_000 }, async () => {
+    const greeting = "hello from the tunneled destination";
+    const sockets = new Set<net.Socket>();
+    const proxy = net.createServer((socket) => {
+      sockets.add(socket);
+      socket.once("close", () => sockets.delete(socket));
+      socket.once("data", () => {
+        socket.end(`HTTP/1.1 200 Connection Established\r\n\r\n${greeting}`);
+      });
+    });
+    proxy.listen(0, "127.0.0.1");
+    await once(proxy, "listening");
+    let socket: net.Socket | undefined;
+    try {
+      socket = await openProxyConnectTunnel({
+        proxyUrl: `http://127.0.0.1:${(proxy.address() as AddressInfo).port}`,
+        targetHost: "example.test",
+        targetPort: 1234,
+        timeoutMs: 1_000,
+      });
+      let received = "";
+      if (consumption === "data events") {
+        socket.on("data", (chunk: Buffer) => { received += chunk.toString(); });
+        await once(socket, "end");
+      } else {
+        for await (const chunk of socket) {
+          received += chunk.toString();
+        }
+      }
+      assert.equal(received, greeting);
+    } finally {
+      socket?.destroy();
+      for (const active of sockets) {
+        active.destroy();
+      }
+      await new Promise<void>((resolve) => proxy.close(() => resolve()));
+    }
+  });
+}
 
 test("CONNECT helper rejects non-2xx proxy responses", async () => {
   await withConnectRecorder(async (proxyUrl) => {

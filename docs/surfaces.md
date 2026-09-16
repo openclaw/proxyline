@@ -34,6 +34,8 @@ When the caller supplied an `https.Agent` with TLS options, the following keys a
 
 The destination `servername` is also inferred from the URL or `hostname`/`host` options when the caller did not set one. IP literals are not used as SNI values.
 
+Invalid destination TLS settings, such as an unsupported cipher list, fail through the request's `error` event and close the pending proxy connection.
+
 ### Absolute-form requests
 
 Some HTTP clients build absolute-form requests themselves (e.g. `path: "https://api.example.com/graphql"`). Proxyline leaves the path intact and forwards it through the proxy unchanged, so libraries that already implement their own proxy handling continue to function.
@@ -99,7 +101,7 @@ Properties:
 - A bounded `16 KiB` header buffer protects against malicious or runaway proxy responses.
 - `timeoutMs` is enforced and emits a `CONNECT_FAILED` error on expiry. When omitted, the default is 30 seconds; pass `0` for no timeout.
 - `signal` aborts an in-progress handshake and destroys its active proxy socket.
-- Bytes the proxy sends after the response headers are re-injected with `socket.unshift()` so the caller sees the full target stream.
+- Bytes the proxy sends after the response headers stay buffered until the caller reads them, including bytes received in the same packet as the CONNECT response. Consume the socket with `data` listeners, piping, or async iteration as usual.
 - Non-2xx status lines, header overrun, premature close, and socket errors are all surfaced as `ProxylineError` with code `CONNECT_FAILED`.
 
 The helper is standalone — it does not require `installGlobalProxy` to have been called.

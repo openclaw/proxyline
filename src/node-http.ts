@@ -777,7 +777,13 @@ class ProxylineConnectAgent extends ProxylineRequestAgent {
         finish(null, proxySocket);
         return;
       }
-      const currentTlsSocket = tls.connect(destinationTlsConnectOptions(options, proxySocket));
+      let currentTlsSocket: tls.TLSSocket;
+      try {
+        currentTlsSocket = tls.connect(destinationTlsConnectOptions(options, proxySocket));
+      } catch (error) {
+        fail(error instanceof Error ? error : new Error(String(error)));
+        return;
+      }
       tlsSocket = currentTlsSocket;
       this.#pendingConnectSockets.add(currentTlsSocket);
       const onTlsError = (error: Error): void => {

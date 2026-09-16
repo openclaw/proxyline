@@ -112,7 +112,7 @@ export async function openProxyConnectTunnel(
         clearTimeout(timeout);
         timeout = undefined;
       }
-      socket?.off("data", onData);
+      socket?.off("readable", onReadable);
       socket?.off("error", onError);
       socket?.off("end", onClosed);
       socket?.off("close", onClosed);
@@ -156,7 +156,12 @@ export async function openProxyConnectTunnel(
       }
     };
 
-    const onData = (chunk: Buffer): void => {
+    const onReadable = (): void => {
+      // Keep the socket out of flowing mode until the caller owns the tunnel.
+      const chunk: Buffer | null = socket?.read() ?? null;
+      if (chunk === null) {
+        return;
+      }
       responseBuffer = Buffer.concat([responseBuffer, chunk]);
       const headerEnd = responseBuffer.indexOf("\r\n\r\n");
       if (headerEnd === -1) {
@@ -213,7 +218,7 @@ export async function openProxyConnectTunnel(
       }
       socket = connectToProxy(proxy, options.proxyTls, options.proxyConnect);
       socket.once(proxy.protocol === "https:" ? "secureConnect" : "connect", onConnected);
-      socket.on("data", onData);
+      socket.on("readable", onReadable);
       socket.once("error", onError);
       socket.once("end", onClosed);
       socket.once("close", onClosed);
