@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Fixed explicit CONNECT tunnels losing early destination bytes before the caller could read them.
+- Fixed invalid destination TLS options escaping Node CONNECT agents as uncaught exceptions instead of request errors, and released the pending proxy connection on failure.
+
 ## 0.3.12 - 2026-09-08
 
 - Added prepared proxy DNS lookups and proxy-specific TLS controls to Node helper agents and raw CONNECT tunnels, including client certificates and explicit server names.
