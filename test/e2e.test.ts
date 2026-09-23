@@ -1201,16 +1201,16 @@ test("node CONNECT agent separates pooled sockets by destination TLS policy", { 
   Object.assign(agent, { keepAlive: true });
   try {
     const url = `${lab.targetUrl}/allowed`;
-    const insecure = { agent, rejectUnauthorized: false };
-    assert.equal((await readHttps(url, insecure)).status, 200);
-    assert.equal((await readHttps(url, insecure)).status, 200);
+    const trusted = { agent, ca: lab.targetCa };
+    assert.equal((await readHttps(url, trusted)).status, 200);
+    assert.equal((await readHttps(url, trusted)).status, 200);
     assert.equal(lab.events.filter((event) => event.type === "connect").length, 1);
 
-    await assert.rejects(readHttps(url, { agent, rejectUnauthorized: true }), /self-signed certificate/);
+    await assert.rejects(readHttps(url, { agent }), /self-signed certificate/);
     assert.equal(lab.events.filter((event) => event.type === "connect").length, 2);
 
-    assert.equal((await readHttps(url, { agent, ca: lab.targetCa })).status, 200);
-    assert.equal(lab.events.filter((event) => event.type === "connect").length, 3);
+    assert.equal((await readHttps(url, trusted)).status, 200);
+    assert.equal(lab.events.filter((event) => event.type === "connect").length, 2);
   } finally {
     agent.destroy();
     await lab.close();
