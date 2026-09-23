@@ -29,8 +29,9 @@ function packageManagerCommand(): { command: string; prefixArgs: string[]; suppo
   return { command: process.platform === "win32" ? "pnpm.cmd" : "pnpm", prefixArgs: [], supportsCache: false };
 }
 
-test("packed package includes sources and product docs referenced by metadata", () => {
+test("packed package includes sources and product docs referenced by metadata", (t) => {
   const packDir = fs.mkdtempSync(path.join(os.tmpdir(), "proxyline-pack-"));
+  t.after(() => fs.rmSync(packDir, { recursive: true, force: true }));
   const cacheDir = path.join(packDir, "npm-cache");
   const packageManager = packageManagerCommand();
   run(packageManager.command, [
