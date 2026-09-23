@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed pooled HTTPS CONNECT sockets being reused across different destination TLS settings, including certificate verification and CA trust.
 - Fixed explicit CONNECT tunnels losing early destination bytes before the caller could read them.
 - Fixed invalid destination TLS options escaping Node CONNECT agents as uncaught exceptions instead of request errors, and released the pending proxy connection on failure.
 

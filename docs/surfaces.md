@@ -26,6 +26,8 @@ HTTP-forward proxy connections and CONNECT handshakes default to a 30-second con
 
 For HTTP-forward and CONNECT requests, `req.destroy()` or `req.abort()` also cancels a pending connection to the proxy. This applies to long-lived helper agents: cancellation releases the pending socket without destroying the whole agent or affecting another queued request.
 
+HTTPS CONNECT agents separate pooled connections by destination TLS settings using Node's HTTPS agent rules. Requests with different CA trust, certificate verification, or client certificates cannot reuse one another's established TLS connections.
+
 ### TLS identity preservation
 
 When the caller supplied an `https.Agent` with TLS options, the following keys are lifted into the request so the destination TLS handshake still validates correctly:
