@@ -1191,6 +1191,32 @@ for (const [protocol, action] of [["http", "timeout"], ["https", "timeout"], ["h
   });
 }
 
+test("node CONNECT agent separates pooled sockets by destination TLS policy", { timeout: 10_000 }, async () => {
+  const lab = await startProxyLab({ secureTarget: true });
+  const agent = withProxyEnv({ HTTPS_PROXY: lab.proxyUrl }, () =>
+    createAmbientNodeProxyAgent({ protocol: "https" }),
+  );
+  assert.ok(agent);
+  Object.assign(agent.options, { keepAlive: true, maxSockets: 1 });
+  Object.assign(agent, { keepAlive: true });
+  try {
+    const url = `${lab.targetUrl}/allowed`;
+    const insecure = { agent, rejectUnauthorized: false };
+    assert.equal((await readHttps(url, insecure)).status, 200);
+    assert.equal((await readHttps(url, insecure)).status, 200);
+    assert.equal(lab.events.filter((event) => event.type === "connect").length, 1);
+
+    await assert.rejects(readHttps(url, { agent, rejectUnauthorized: true }), /self-signed certificate/);
+    assert.equal(lab.events.filter((event) => event.type === "connect").length, 2);
+
+    assert.equal((await readHttps(url, { agent, ca: lab.targetCa })).status, 200);
+    assert.equal(lab.events.filter((event) => event.type === "connect").length, 3);
+  } finally {
+    agent.destroy();
+    await lab.close();
+  }
+});
+
 test("node CONNECT agent fails requests when destination TLS closes during handshake", async () => {
   const netMutable = net as unknown as { connect: (...args: unknown[]) => net.Socket };
   const tlsMutable = tls as unknown as { connect: (...args: unknown[]) => tls.TLSSocket };

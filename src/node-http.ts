@@ -625,6 +625,13 @@ class ProxylineConnectAgent extends ProxylineRequestAgent {
     this.#proxyConnect = proxyConnect;
   }
 
+  public override getName(options: NodeAgentRequestOptions): string {
+    // A tunnel must not reuse destination TLS established under another policy.
+    return isSecureEndpoint(options)
+      ? https.Agent.prototype.getName.call(this, options)
+      : super.getName(options);
+  }
+
   public override createConnection(
     options: NodeAgentRequestOptions,
     callback?: (error: Error | null, socket: net.Socket) => void,
