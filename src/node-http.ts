@@ -10,7 +10,7 @@ import {
 } from "./env.js";
 import { formatConnectAuthority, resolveProxyConnectTimeoutMs } from "./connect.js";
 import { connectToProxy, type ProxyConnectOptions } from "./proxy-socket.js";
-import { ProxylineError, decodeProxyUserinfoComponent, type ProxylineTlsOptions } from "./shared.js";
+import { ProxylineError, resolveProxyAuthorization, type ProxylineTlsOptions } from "./shared.js";
 import type { ProxylineSurface, ProxyResolver } from "./types.js";
 
 export type NodeHttpRequestOptions = http.RequestOptions & https.RequestOptions & {
@@ -196,15 +196,6 @@ export function bindNodeHttpMethod<TMethod extends NodeHttpMethod>(
   }) as TMethod;
 }
 
-function proxyAuthorization(proxy: URL): string | undefined {
-  if (!proxy.username && !proxy.password) {
-    return undefined;
-  }
-  const username = decodeProxyUserinfoComponent(proxy.username);
-  const password = decodeProxyUserinfoComponent(proxy.password);
-  return `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
-}
-
 function assertSupportedNodeProxyProtocol(proxy: URL): void {
   if (proxy.protocol !== "http:" && proxy.protocol !== "https:") {
     throw new ProxylineError(
@@ -268,7 +259,7 @@ function proxyForwardRequestPath(req: http.ClientRequest, options: NodeAgentRequ
 }
 
 function setProxyRequestHeaders(req: http.ClientRequest, proxy: URL, keepAlive: boolean): void {
-  const authorization = proxyAuthorization(proxy);
+  const authorization = resolveProxyAuthorization(proxy);
   if (authorization !== undefined) {
     req.setHeader("Proxy-Authorization", authorization);
   }
@@ -746,7 +737,7 @@ class ProxylineConnectAgent extends ProxylineRequestAgent {
           `Host: ${authority}`,
           `Proxy-Connection: ${this.#keepAlive ? "Keep-Alive" : "close"}`,
         ];
-        const authorization = proxyAuthorization(this.#proxy);
+        const authorization = resolveProxyAuthorization(this.#proxy);
         if (authorization !== undefined) {
           headers.push(`Proxy-Authorization: ${authorization}`);
         }

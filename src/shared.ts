@@ -27,6 +27,15 @@ export function decodeProxyUserinfoComponent(value: string): string {
   }
 }
 
+export function resolveProxyAuthorization(proxy: URL): string | undefined {
+  if (!proxy.username && !proxy.password) {
+    return undefined;
+  }
+  const username = decodeProxyUserinfoComponent(proxy.username);
+  const password = decodeProxyUserinfoComponent(proxy.password);
+  return `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
+}
+
 export function resolveProxyTlsCa(options: ProxylineTlsOptions | undefined): string | undefined {
   if (!options) {
     return undefined;

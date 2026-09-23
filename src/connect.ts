@@ -1,7 +1,7 @@
 import net from "node:net";
 import tls from "node:tls";
 import { connectToProxy, type ProxyConnectOptions } from "./proxy-socket.js";
-import { ProxylineError, decodeProxyUserinfoComponent, type ProxylineTlsOptions, redactProxyUrl } from "./shared.js";
+import { ProxylineError, resolveProxyAuthorization, type ProxylineTlsOptions, redactProxyUrl } from "./shared.js";
 
 export type OpenProxyConnectTunnelOptions = Readonly<{
   proxyUrl: string | URL;
@@ -38,15 +38,6 @@ const INVALID_CONNECT_AUTHORITY_PATTERN = /[\u0000-\u0020\u007f]/;
 const INVALID_CONNECT_HOST_DELIMITER_PATTERN = /[/:?#@\\]/;
 
 type ProxySocket = net.Socket | tls.TLSSocket;
-
-function resolveProxyAuthorization(proxy: URL): string | undefined {
-  if (!proxy.username && !proxy.password) {
-    return undefined;
-  }
-  const username = decodeProxyUserinfoComponent(proxy.username);
-  const password = decodeProxyUserinfoComponent(proxy.password);
-  return `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
-}
 
 export function formatConnectAuthority(targetHost: string, targetPort: number): string {
   if (!Number.isInteger(targetPort) || targetPort < 1 || targetPort > 65_535) {
