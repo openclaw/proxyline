@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.3.13 - 2026-09-22
+
+**Highlights:** HTTPS CONNECT pools now isolate destination TLS trust, and CONNECT handoffs preserve early bytes and report TLS setup errors safely.
+
 - Fixed pooled HTTPS CONNECT sockets being reused across different destination TLS settings, including certificate verification and CA trust.
 - Fixed explicit CONNECT tunnels losing early destination bytes before the caller could read them.
 - Fixed invalid destination TLS options escaping Node CONNECT agents as uncaught exceptions instead of request errors, and released the pending proxy connection on failure.
