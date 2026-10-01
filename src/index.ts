@@ -3,6 +3,7 @@ export type { ProxyConnectOptions } from "./proxy-socket.js";
 export {
   createAmbientNodeProxyAgent,
   hasAmbientNodeProxyConfigured,
+  ProxylineNodeProxyAgent,
   type AmbientNodeProxyAgentOptions,
 } from "./node-http.js";
 export { installGlobalProxy, installProxyline } from "./runtime.js";
