@@ -71,6 +71,46 @@ test("packed package includes sources and product docs referenced by metadata", 
       );
     }
   }
+
+  const consumerRoot = path.join(packDir, "consumer");
+  fs.mkdirSync(consumerRoot);
+  fs.writeFileSync(
+    path.join(consumerRoot, "package.json"),
+    JSON.stringify({ private: true, type: "module" }),
+  );
+  run(
+    process.platform === "win32" ? "npm.cmd" : "npm",
+    [
+      "install",
+      "--ignore-scripts",
+      "--no-audit",
+      "--no-fund",
+      "--no-package-lock",
+      tarballPath,
+      path.join(repoRoot, "node_modules", "undici"),
+    ],
+    consumerRoot,
+  );
+  const importResult = JSON.parse(
+    run(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        `
+import { ProxylineNodeProxyAgent } from "@openclaw/proxyline";
+const agent = new ProxylineNodeProxyAgent({ getProxyForUrl: () => "" });
+console.log(JSON.stringify({
+  exportType: typeof ProxylineNodeProxyAgent,
+  isInstance: agent instanceof ProxylineNodeProxyAgent,
+}));
+agent.destroy();
+`,
+      ],
+      consumerRoot,
+    ),
+  ) as { exportType: string; isInstance: boolean };
+  assert.deepEqual(importResult, { exportType: "function", isInstance: true });
 });
 
 test("built runtime restores fetch globals in a relocated standalone bundle", async () => {
