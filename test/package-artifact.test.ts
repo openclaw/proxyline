@@ -78,6 +78,11 @@ test("packed package includes sources and product docs referenced by metadata", 
     path.join(consumerRoot, "package.json"),
     JSON.stringify({ private: true, type: "module" }),
   );
+  const packageMetadata = JSON.parse(
+    fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"),
+  ) as { devDependencies?: { undici?: string } };
+  const undiciVersion = packageMetadata.devDependencies?.undici;
+  assert.match(undiciVersion ?? "", /^\d+\.\d+\.\d+$/);
   run(
     process.platform === "win32" ? "npm.cmd" : "npm",
     [
@@ -87,7 +92,7 @@ test("packed package includes sources and product docs referenced by metadata", 
       "--no-fund",
       "--no-package-lock",
       tarballPath,
-      path.join(repoRoot, "node_modules", "undici"),
+      `undici@${undiciVersion}`,
     ],
     consumerRoot,
   );
