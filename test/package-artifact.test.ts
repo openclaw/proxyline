@@ -15,18 +15,33 @@ function run(command: string, args: string[], cwd = repoRoot): string {
   return result.stdout;
 }
 
-function packageManagerCommand(): { command: string; prefixArgs: string[]; supportsCache: boolean } {
+function packageManagerCommand(): {
+  command: string;
+  prefixArgs: string[];
+  supportsCache: boolean;
+  installCommand: "add" | "install";
+  installArgs: string[];
+} {
   if (process.env.npm_execpath !== undefined) {
     const execPath = process.env.npm_execpath;
     const extension = path.extname(execPath).toLowerCase();
     const runsWithNode = extension === ".js" || extension === ".cjs" || extension === ".mjs";
+    const isNpm = path.basename(execPath).startsWith("npm");
     return {
       command: runsWithNode ? process.execPath : execPath,
       prefixArgs: runsWithNode ? [execPath] : [],
-      supportsCache: path.basename(execPath).startsWith("npm"),
+      supportsCache: isNpm,
+      installCommand: isNpm ? "install" : "add",
+      installArgs: isNpm ? ["--no-audit", "--no-fund", "--no-package-lock"] : [],
     };
   }
-  return { command: process.platform === "win32" ? "pnpm.cmd" : "pnpm", prefixArgs: [], supportsCache: false };
+  return {
+    command: process.platform === "win32" ? "pnpm.cmd" : "pnpm",
+    prefixArgs: [],
+    supportsCache: false,
+    installCommand: "add",
+    installArgs: [],
+  };
 }
 
 test("packed package includes sources and product docs referenced by metadata", (t) => {
@@ -84,13 +99,12 @@ test("packed package includes sources and product docs referenced by metadata", 
   const undiciVersion = packageMetadata.devDependencies?.undici;
   assert.match(undiciVersion ?? "", /^\d+\.\d+\.\d+$/);
   run(
-    process.platform === "win32" ? "npm.cmd" : "npm",
+    packageManager.command,
     [
-      "install",
+      ...packageManager.prefixArgs,
+      packageManager.installCommand,
       "--ignore-scripts",
-      "--no-audit",
-      "--no-fund",
-      "--no-package-lock",
+      ...packageManager.installArgs,
       tarballPath,
       `undici@${undiciVersion}`,
     ],
