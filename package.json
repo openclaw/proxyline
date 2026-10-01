@@ -1,13 +1,14 @@
 {
   "name": "@openclaw/proxyline",
-  "version": "0.3.13",
+  "version": "0.3.14",
   "description": "Process-global proxy routing for Node.js.",
   "type": "module",
   "license": "MIT",
   "author": "Jesse Merhi",
   "publishConfig": {
     "access": "public",
-    "registry": "https://registry.npmjs.org/"
+    "registry": "https://registry.npmjs.org/",
+    "tag": "legacy"
   },
   "repository": {
     "type": "git",
