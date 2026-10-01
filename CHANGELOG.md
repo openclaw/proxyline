@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Exported `ProxylineNodeProxyAgent` from the package root, with packed-install coverage for direct construction.
+
 ## 0.3.13 - 2026-09-22
 
 **Highlights:** HTTPS CONNECT pools now isolate destination TLS trust, and CONNECT handoffs preserve early bytes and report TLS setup errors safely.
