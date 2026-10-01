@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.0 - 2026-10-01
+
 - Exported `ProxylineNodeProxyAgent` from the package root, with packed-install coverage for direct construction.
 
 ## 0.3.13 - 2026-09-22
