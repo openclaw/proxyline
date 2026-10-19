@@ -2,6 +2,8 @@ import http from "node:http";
 import https from "node:https";
 import net from "node:net";
 import tls from "node:tls";
+import { ADDRCONFIG } from "node:dns";
+import { lookup } from "node:dns/promises";
 import { once } from "node:events";
 import { AddressInfo } from "node:net";
 import { createProxyTestCertificate } from "./proxy-cert.js";
@@ -80,9 +82,12 @@ const upstreamDirectAgent = new http.Agent();
 
 type LabServer = http.Server | https.Server;
 
-function listen(server: LabServer, host = "127.0.0.1"): Promise<AddressInfo> {
-  server.listen(0, host);
-  return once(server, "listening").then(() => server.address() as AddressInfo);
+async function listen(server: LabServer, host = "127.0.0.1"): Promise<AddressInfo> {
+  // Match the client's address-family filtering for dual-stack localhost.
+  const bindHost = host === "localhost" ? (await lookup(host, { hints: ADDRCONFIG })).address : host;
+  server.listen(0, bindHost);
+  await once(server, "listening");
+  return server.address() as AddressInfo;
 }
 
 function formatUrlHost(host: string): string {

@@ -1,9 +1,15 @@
 name: proxyline npm release
+run-name: ${{ inputs.dry_run && 'Dry run' || 'Release' }} proxyline
 
 on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Check and package the current version without publishing
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -11,10 +17,10 @@ permissions:
 
 jobs:
   publish:
-    name: Publish to npm
+    name: ${{ inputs.dry_run && 'Validate package (dry run)' || 'Publish to npm' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment: npm-release
+    environment: ${{ !inputs.dry_run && 'npm-release' || '' }}
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -53,6 +59,7 @@ jobs:
           echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
       - name: Publish to npm
+        if: ${{ !inputs.dry_run }}
         shell: bash
         run: |
           package="${{ steps.package.outputs.name }}@${{ steps.package.outputs.version }}"
