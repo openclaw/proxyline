@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed Node HTTP requests that use `socketPath` being sent to the proxy as `http://localhost/...` instead of connecting to the Unix socket.
+
 ## 0.4.0 - 2026-10-01
 
 - Exported `ProxylineNodeProxyAgent` from the package root, with packed-install coverage for direct construction.

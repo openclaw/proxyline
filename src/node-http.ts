@@ -982,6 +982,12 @@ export class ProxylineNodeProxyAgent extends http.Agent {
       stackProtocol === "https" && options.secureEndpoint !== true
         ? { ...options, secureEndpoint: true }
         : options;
+    if (typeof agentOptions.socketPath === "string" && agentOptions.socketPath !== "") {
+      // Unix domain sockets are local IPC, not network destinations a proxy can reach.
+      (isSecureEndpoint(agentOptions, stackProtocol) ? this.#httpsAgent : this.#httpAgent)
+        .addRequest(req, agentOptions);
+      return;
+    }
     const url = requestDestinationUrl(req, agentOptions, stackProtocol);
     const surface = requestSurface(req, agentOptions, stackProtocol);
     const proxy = this.#getProxyForUrl(url, surface, req);

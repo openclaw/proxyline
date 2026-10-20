@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import http from "node:http";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import type { Dispatcher } from "undici";
 import {
@@ -238,6 +240,44 @@ test("managed mode withBypass preserves promise-like callback results", async ()
     assert.equal((await result).kind, "direct");
   } finally {
     proxy.stop();
+  }
+});
+
+test("managed mode sends socketPath requests to the Unix socket instead of the proxy", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "proxyline-uds-"));
+  const socketPath = path.join(dir, "api.sock");
+  const socketServer = http.createServer((req, res) => {
+    res.end(`uds:${req.url}`);
+  });
+  const proxied: string[] = [];
+  const proxyServer = http.createServer((req, res) => {
+    proxied.push(`${req.method} ${req.url}`);
+    res.end("proxy");
+  });
+  await new Promise<void>((resolve) => socketServer.listen(socketPath, resolve));
+  await new Promise<void>((resolve) => proxyServer.listen(0, "127.0.0.1", resolve));
+  const proxyPort = (proxyServer.address() as { port: number }).port;
+  const proxy = installProxyline({ mode: "managed", proxyUrl: `http://127.0.0.1:${proxyPort}` });
+  try {
+    const body = await new Promise<string>((resolve, reject) => {
+      http
+        .get({ socketPath, path: "/v1/containers" }, (res) => {
+          let text = "";
+          res.setEncoding("utf8");
+          res.on("data", (chunk: string) => {
+            text += chunk;
+          });
+          res.on("end", () => resolve(text));
+        })
+        .on("error", reject);
+    });
+    assert.equal(body, "uds:/v1/containers");
+    assert.deepEqual(proxied, []);
+  } finally {
+    proxy.stop();
+    await new Promise((resolve) => socketServer.close(resolve));
+    await new Promise((resolve) => proxyServer.close(resolve));
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
