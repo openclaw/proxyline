@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Fixed Node HTTP requests that use `socketPath` being sent to the proxy as `http://localhost/...` instead of connecting to the Unix socket.
+- Fixed Node HTTP(S) `socketPath` requests being sent to a network proxy instead of their local Unix socket or Windows named pipe, preserving local headers and payloads in managed and ambient modes. Thanks @parth-garg01 (#46).
 
 ## 0.4.0 - 2026-10-01
 
