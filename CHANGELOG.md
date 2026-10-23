@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.4.1 - 2026-10-23
+
+**Highlights:** Security fix: local Unix socket and Windows named pipe requests now stay local, preventing headers and payloads from being disclosed to a configured network proxy.
+
 - Fixed Node HTTP(S) `socketPath` requests being sent to a network proxy instead of their local Unix socket or Windows named pipe, preserving local headers and payloads in managed and ambient modes. Thanks @parth-garg01 (#46).
 
 ## 0.4.0 - 2026-10-01
