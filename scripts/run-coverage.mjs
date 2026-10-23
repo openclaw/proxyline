@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 const tests = [
   "test/index.test.ts",
   "test/e2e.test.ts",
+  "test/socket-path.test.ts",
   "test/package.test.ts",
   "test/scripts.test.ts",
 ];
