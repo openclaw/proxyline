@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Batch main CodeQL analysis weekly while preserving PR and manual scans.
+
 ## 0.4.1 - 2026-10-23
 
 **Highlights:** Security fix: local Unix socket and Windows named pipe requests now stay local, preventing headers and payloads from being disclosed to a configured network proxy.
