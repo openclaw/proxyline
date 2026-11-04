@@ -201,4 +201,3 @@ test("branch dry run needs no tag; mismatched release event fails", bashOnly, (t
   assert.ok(release.indexOf("name: Verify release tag") < release.indexOf("name: Install dependencies"));
   assert.match(release, /environment: \$\{\{ !inputs\.dry_run && 'npm-release' \|\| '' \}\}/);
 });
-
