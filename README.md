@@ -113,6 +113,19 @@ pnpm test
 pnpm docs:build
 ```
 
+## Releasing
+
+Releases require an annotated SSH-signed `v<package.json version>` tag from a key
+in the committed `.github/release-allowed-signers`. The tag must target the
+checked-out commit. The npm workflow freezes the tag object and source commit,
+then rechecks both remote identities before publishing or reporting an
+already-published version. A replacement tag at the same commit is rejected.
+
+Manual dispatch may select a branch whose matching version tag targets that
+commit. Enable `dry_run` to check and pack a branch before its tag exists;
+this mode never publishes. Publishing uses the existing `npm-release`
+environment and OIDC trusted publisher; do not publish locally.
+
 ## License
 
 [MIT](./LICENSE)

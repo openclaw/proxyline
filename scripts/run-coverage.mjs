@@ -7,6 +7,7 @@ const tests = [
   "test/socket-path.test.ts",
   "test/package.test.ts",
   "test/scripts.test.ts",
+  "test/release-tag.test.mjs",
 ];
 
 const coverageArgs = [

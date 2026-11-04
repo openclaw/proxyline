@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Enforce the SSH-signed annotated release-tag policy and freeze both tag and source identities before npm publishing or already-published no-ops. Untagged branch dry runs remain supported.
+
 - Batch main CodeQL analysis weekly while preserving PR and manual scans.
 
 ## 0.4.1 - 2026-10-23

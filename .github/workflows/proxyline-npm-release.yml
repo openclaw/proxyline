@@ -24,6 +24,10 @@ jobs:
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
 
       - name: Set up pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -38,6 +42,22 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
           registry-url: https://registry.npmjs.org/
+
+      - name: Verify release tag
+        id: tag
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          tag="v$(node -p "require('./package.json').version")"
+          if [ -n "$RELEASE_TAG" ] && [ "$RELEASE_TAG" != "$tag" ]; then
+            echo "::error::Release tag/version mismatch: expected $tag, got $RELEASE_TAG."
+            exit 1
+          fi
+          echo "tag_name=$tag" >> "$GITHUB_OUTPUT"
+          if [ "$DRY_RUN" != "true" ]; then
+            node scripts/verify-release-tag.mjs "$tag"
+          fi
 
       - name: Set up npm trusted publishing
         run: npm install --global npm@12.1.0
@@ -61,19 +81,30 @@ jobs:
       - name: Publish to npm
         if: ${{ !inputs.dry_run }}
         shell: bash
+        env:
+          TAG_NAME: ${{ steps.tag.outputs.tag_name }}
+          TAG_OBJECT: ${{ steps.tag.outputs.tag_object }}
+          SOURCE_SHA: ${{ steps.tag.outputs.source_sha }}
+          PACKAGE: ${{ steps.package.outputs.name }}@${{ steps.package.outputs.version }}
         run: |
-          package="${{ steps.package.outputs.name }}@${{ steps.package.outputs.version }}"
+          verify_tag() {
+            node scripts/verify-release-tag.mjs "$TAG_NAME" "$TAG_OBJECT" "$SOURCE_SHA"
+          }
+          package="$PACKAGE"
           if npm view "$package" version --registry https://registry.npmjs.org/ >/dev/null 2>&1; then
+            verify_tag
             echo "::notice::$package is already published."
             exit 0
           fi
 
+          verify_tag
           set +e
           log="$RUNNER_TEMP/npm-publish.log"
           npm publish --access public --provenance >"$log" 2>&1
           status=$?
           cat "$log"
           if [ "$status" -ne 0 ] && npm view "$package" version --registry https://registry.npmjs.org/ >/dev/null 2>&1; then
+            verify_tag || exit 1
             echo "::notice::$package is already published."
             exit 0
           fi
