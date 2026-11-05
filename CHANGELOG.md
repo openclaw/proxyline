@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.4.2 - 2026-11-05
+
+**Highlights:** Security fix: require patched Undici 8.12.2 or newer, and enforce authorized SSH-signed release tags before npm publishing.
+
 - Require patched Undici 8.12.2 or newer and update the tested Undici, WebSocket, and Node type dependencies.
 
 - Enforce the SSH-signed annotated release-tag policy and freeze both tag and source identities before npm publishing or already-published no-ops. Untagged branch dry runs remain supported.
