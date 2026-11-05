@@ -62,18 +62,18 @@
     "crabbox:warmup": "crabbox warmup"
   },
   "devDependencies": {
-    "@types/node": "26.6.2",
-    "@types/ws": "8.18.1",
+    "@types/node": "26.6.6",
+    "@types/ws": "8.18.2",
     "esbuild": "0.28.2",
     "tsx": "4.23.15",
     "typescript": "^7.0.2",
-    "undici": "8.10.2",
-    "ws": "8.21.3"
+    "undici": "8.12.3",
+    "ws": "8.22.1"
   },
   "engines": {
     "node": ">=22.19.0"
   },
   "peerDependencies": {
-    "undici": ">=8.5.0 <9"
+    "undici": ">=8.12.2 <9"
   }
 }

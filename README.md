@@ -14,16 +14,16 @@ Documentation is available at [proxyline.dev](https://proxyline.dev).
 ## Install
 
 ```sh
-pnpm add @openclaw/proxyline undici@^8.5.0
+pnpm add @openclaw/proxyline undici@^8.12.2
 ```
 
 Or with npm:
 
 ```sh
-npm install @openclaw/proxyline undici@^8.5.0
+npm install @openclaw/proxyline undici@^8.12.2
 ```
 
-Proxyline requires Node.js 22.19.0 or newer and a host `undici` version in the `>=8.5.0 <9` range. The package is ESM-only and includes TypeScript declarations.
+Proxyline requires Node.js 22.19.0 or newer and a host `undici` version in the `>=8.12.2 <9` range. The package is ESM-only and includes TypeScript declarations. The Undici minimum includes fixes for TLS validation, redirects, and denial-of-service vulnerabilities.
 
 Proxyline imports the installed Undici peer entrypoint explicitly, including when loaded under Bun, so its fetch classes and dispatcher cleanup use the same implementation. The static import also lets Node-targeted bundlers include that peer in standalone output.
 
