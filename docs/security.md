@@ -18,7 +18,7 @@ In **managed** mode, Proxyline forces traffic through the configured proxy on th
 - WebSocket clients that accept a Node `agent`, via `proxy.createWebSocketAgent()` or by reusing the patched `http.request` during the upgrade
 - Explicit HTTP CONNECT when callers opt in to `openProxyConnectTunnel`
 
-Caller-supplied `http.Agent` / `https.Agent` instances are replaced per request, and `createConnection` overrides are stripped. TLS-relevant agent options are lifted onto the request so destination TLS still validates correctly.
+Caller-supplied `http.Agent` / `https.Agent` instances are replaced per request, and `createConnection` overrides are stripped. TLS-relevant agent options are lifted onto the request so destination TLS still validates correctly. A non-empty `socketPath` on that agent is lifted too, so the request stays on its local Unix socket or Windows named pipe instead of the configured proxy.
 
 Managed mode can also accept a `bypassPolicy` callback for explicitly trusted direct-routing exceptions, such as local control-plane endpoints. Treat it as part of your security policy: keep it narrow and log matching URLs with `explain()`.
 
