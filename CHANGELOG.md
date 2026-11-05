@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed caller `http.Agent` and `https.Agent` `socketPath` options being dropped when Proxyline replaces the agent. Local Unix sockets and Windows named pipes stay on local IPC instead of sending the request line, headers, and body to the configured proxy.
+
 ## 0.4.2 - 2026-11-05
 
 **Highlights:** Security fix: require patched Undici 8.12.2 or newer, and enforce authorized SSH-signed release tags before npm publishing.

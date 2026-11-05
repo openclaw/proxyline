@@ -14,7 +14,7 @@ Patched methods:
 Per request, Proxyline:
 
 1. Copies the call's options object so caller state is not mutated.
-2. Reads TLS-relevant options off any caller-supplied `agent` and lifts them onto the request options (see [TLS identity preservation](#tls-identity-preservation)).
+2. Reads TLS-relevant options off any caller-supplied `agent` and lifts them onto the request options (see [TLS identity preservation](#tls-identity-preservation)). A non-empty `socketPath` on that agent is lifted the same way, because Node applies agent options over the request.
 3. Sets `servername` to the destination hostname when not already set and the hostname is not an IP literal.
 4. Builds a fresh Proxyline Node agent for the request and assigns it as `options.agent`.
 5. Deletes any `createConnection` override so callers cannot punch through to the kernel directly.
@@ -23,7 +23,8 @@ Per request, Proxyline:
 This means caller agents are not just ignored — the per-request agent is replaced before the original method runs, so even libraries that read `req.agent` after construction see the proxy agent.
 
 Requests with a non-empty `socketPath` use Node's local socket transport in both
-managed and ambient modes. Unix domain sockets and Windows named pipes remain
+managed and ambient modes. That includes a `socketPath` set only on a caller
+`http.Agent` or `https.Agent`. Unix domain sockets and Windows named pipes remain
 local IPC; their headers and bodies are not forwarded to the network proxy.
 HTTPS requests over a local socket retain their destination TLS options.
 
