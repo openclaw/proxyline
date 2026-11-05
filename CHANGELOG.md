@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Require patched Undici 8.12.2 or newer and update the tested Undici, WebSocket, and Node type dependencies.
+
 - Enforce the SSH-signed annotated release-tag policy and freeze both tag and source identities before npm publishing or already-published no-ops. Untagged branch dry runs remain supported.
 
 - Batch main CodeQL analysis weekly while preserving PR and manual scans.
