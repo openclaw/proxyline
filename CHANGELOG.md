@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Fixed caller `http.Agent` and `https.Agent` `socketPath` options being dropped when Proxyline replaces the agent. Local Unix sockets and Windows named pipes stay on local IPC instead of sending the request line, headers, and body to the configured proxy.
+- Fixed caller `http.Agent` and `https.Agent` `socketPath` options being dropped when Proxyline replaces the agent. Local Unix sockets and Windows named pipes stay on local IPC instead of sending the request line, headers, and body to the configured proxy. Thanks @SebTardif.
 
 ## 0.4.2 - 2026-11-05
 
