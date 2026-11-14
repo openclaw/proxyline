@@ -42,8 +42,12 @@ type RequestSetTimeout = (
   callback?: () => void,
 ) => http.ClientRequest;
 type RequestDestroy = (this: http.ClientRequest, error?: Error) => http.ClientRequest;
+type CallerAgentOptions = NodeAgentOptions & {
+  // @types/node omits this. Node's Agent still stores it and applies it in addRequest.
+  socketPath?: string;
+};
 type NodeAgentWithOptions = http.Agent & {
-  options?: NodeAgentOptions;
+  options?: CallerAgentOptions;
 };
 type NodeProxyAgentOptions = NodeAgentOptions & {
   defaultProtocol?: "http" | "https";
@@ -97,7 +101,7 @@ function copyNodeHttpOptions(value: unknown): NodeHttpRequestOptions {
   return { ...(value as NodeHttpRequestOptions) };
 }
 
-function readAgentOptions(agent: http.Agent | false | undefined): NodeAgentOptions | undefined {
+function readAgentOptions(agent: http.Agent | false | undefined): CallerAgentOptions | undefined {
   if (agent === undefined || agent === false) {
     return undefined;
   }
@@ -114,6 +118,10 @@ function preserveCallerAgentOptions(options: NodeHttpRequestOptions): void {
     if (value !== undefined && options[key as keyof NodeHttpRequestOptions] === undefined) {
       options[key as keyof NodeHttpRequestOptions] = value as never;
     }
+  }
+  // Node merges agent options over the request inside addRequest.
+  if (typeof agentOptions.socketPath === "string" && agentOptions.socketPath !== "") {
+    options.socketPath = agentOptions.socketPath;
   }
 }
 
