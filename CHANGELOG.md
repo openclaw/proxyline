@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Refresh Undici, ws, pnpm, and release npm within the two-day dependency cooldown.
+
 ## 0.4.2 - 2026-11-05
 
 **Highlights:** Security fix: require patched Undici 8.12.2 or newer, and enforce authorized SSH-signed release tags before npm publishing.
