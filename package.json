@@ -17,7 +17,7 @@
     "url": "https://github.com/openclaw/proxyline/issues"
   },
   "homepage": "https://proxyline.dev",
-  "packageManager": "pnpm@11.28.11",
+  "packageManager": "pnpm@11.28.12",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -68,7 +68,7 @@
     "tsx": "4.23.15",
     "typescript": "^7.0.2",
     "undici": "8.12.4",
-    "ws": "8.22.2"
+    "ws": "8.23.0"
   },
   "engines": {
     "node": ">=22.19.0"
